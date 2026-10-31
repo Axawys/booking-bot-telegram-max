@@ -40,12 +40,32 @@ def btn_use_saved_phone(phone: str) -> str:
 # --- Даты, деньги ---------------------------------------------------------
 
 MONTHS = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+    "Январь",
+    "Февраль",
+    "Март",
+    "Апрель",
+    "Май",
+    "Июнь",
+    "Июль",
+    "Август",
+    "Сентябрь",
+    "Октябрь",
+    "Ноябрь",
+    "Декабрь",
 ]
 MONTHS_GEN = [
-    "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
 ]
 WEEKDAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
@@ -116,19 +136,11 @@ START = (
 )
 
 
-
 def services_list(services: Iterable[Service]) -> str:
-    lines = [
-        f"• <b>{escape(s.name)}</b> · {format_duration(s.duration_minutes)}"
-        for s in services
-    ]
+    lines = [f"• <b>{escape(s.name)}</b> · {format_duration(s.duration_minutes)}" for s in services]
     if not lines:
         return "💼 <b>Услуги и цены</b>\n\nСписок услуг пока пуст."
-    return (
-        "💼 <b>Услуги и цены</b>\n\n"
-        + "\n".join(lines)
-        + "\n\n<i>Цены демонстрационные.</i>"
-    )
+    return "💼 <b>Услуги и цены</b>\n\n" + "\n".join(lines) + "\n\n<i>Цены демонстрационные.</i>"
 
 
 CONTACTS = (
@@ -145,6 +157,8 @@ BANNED = "⛔ Доступ к боту ограничен администрат
 
 def throttled(seconds: int) -> str:
     return f"⏳ Слишком много действий подряд. Подождите {seconds} сек. и попробуйте снова."
+
+
 UNKNOWN_COMMAND = "Неизвестная команда. Главное меню — /start"
 STALE_BUTTON = "Эта кнопка устарела. Начните запись заново — «Записаться»."
 BACK_TO_MENU = "Главное меню 👇"
@@ -198,9 +212,9 @@ BOOK_DAY_UNAVAILABLE_ALERT = "На эту дату запись недоступ
 BOOK_SLOT_GONE_ALERT = "Это время уже недоступно. Выберите другое."
 BOOK_SLOT_TAKEN = "😔 <b>Это время только что заняли.</b> Выберите другое:"
 BOOK_SLOT_CLOSED = "⛔ <b>Это время только что закрыли для записи.</b> Выберите другое:"
-BOOK_OUT_OF_HORIZON = (
-    "📅 <b>Запись на эту дату сейчас закрыта.</b> Выберите другую дату:"
-)
+BOOK_OUT_OF_HORIZON = "📅 <b>Запись на эту дату сейчас закрыта.</b> Выберите другую дату:"
+
+
 def book_limit_active(limit: int) -> str:
     word = plural(limit, "активная запись", "активные записи", "активных записей")
     return (
@@ -290,7 +304,8 @@ def my_bookings_list(bookings: Sequence[Booking], notice: str | None = None) -> 
         for i, b in enumerate(bookings, start=1)
     ]
     return (
-        head + "📋 <b>Мои записи</b>\n\n"
+        head
+        + "📋 <b>Мои записи</b>\n\n"
         + "\n\n".join(items)
         + "\n\nЧтобы отменить запись, нажмите на неё ниже."
     )
@@ -312,10 +327,7 @@ def my_booking_cancelled(booking: Booking) -> str:
 
 
 def _booking_short(booking: Booking) -> str:
-    return (
-        f"💼 Услуга: <b>{escape(booking.service.name)}</b>\n"
-        f"📅 Когда: <b>{_when(booking)}</b>"
-    )
+    return f"💼 Услуга: <b>{escape(booking.service.name)}</b>\n📅 Когда: <b>{_when(booking)}</b>"
 
 
 def client_booking_confirmed(booking: Booking) -> str:
@@ -366,6 +378,8 @@ ADMIN_HELP = (
     "Уже сделанные записи при закрытии сохраняются.\n\n"
     "Новые заявки приходят сюда автоматически, с кнопками подтверждения."
 )
+
+
 def admin_start(name: str, pending: str) -> str:
     return (
         f"👋 {name}, вы вошли как <b>администратор</b>.\n\n"
@@ -429,9 +443,7 @@ ADMIN_TITLE_PENDING = "📋 Заявка"
 ADMIN_TITLE_CANCELLED = "🚫 Клиент отменил запись"
 
 
-def admin_day_schedule(
-    day: date, bookings: Sequence[Booking], closure: str | None = None
-) -> str:
+def admin_day_schedule(day: date, bookings: Sequence[Booking], closure: str | None = None) -> str:
     head = f"📅 <b>Расписание на {format_date(day)}</b>\n\n"
     if closure:
         head += f"{closure}\n\n"
@@ -494,9 +506,7 @@ def _ranges(ranges: Iterable[tuple[datetime, datetime]]) -> str:
     return ", ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in ranges)
 
 
-def day_closure(
-    state: str, closed_ranges: Sequence[tuple[datetime, datetime]]
-) -> str | None:
+def day_closure(state: str, closed_ranges: Sequence[tuple[datetime, datetime]]) -> str | None:
     """Строка о закрытом времени дня. None — день открыт полностью."""
     if state == DAY_CLOSED:
         return "🚫 <b>День закрыт для записи</b>"
@@ -581,9 +591,7 @@ def admin_period_closed(period: str, kept: Sequence[Booking], open_hint: str) ->
         ]
         if len(kept) > 10:
             lines.append(f"…и ещё {len(kept) - 10}")
-        text += (
-            f"\n\nЗаписи в этом периоде сохранены ({len(kept)}):\n" + "\n".join(lines)
-        )
+        text += f"\n\nЗаписи в этом периоде сохранены ({len(kept)}):\n" + "\n".join(lines)
     return text + f"\n\nОткрыть снова: <code>/open {open_hint}</code>"
 
 
@@ -591,7 +599,11 @@ def admin_period_opened(period: str, horizon_days: int) -> str:
     return (
         f"✅ <b>Открыто для записи:</b> {period}\n"
         "<i>Клиенты видят даты "
-        + ("только на сегодня" if horizon_days == 0 else f"не дальше чем на {days_ahead(horizon_days)} вперёд")
+        + (
+            "только на сегодня"
+            if horizon_days == 0
+            else f"не дальше чем на {days_ahead(horizon_days)} вперёд"
+        )
         + " (изменить — /horizon).</i>"
     )
 
@@ -602,7 +614,9 @@ BTN_HORIZON = "📆 Горизонт записи: {days}"
 
 def admin_horizon(horizon_days: int, last_day: date, notice: str | None = None) -> str:
     head = f"{notice}\n\n" if notice else ""
-    today = "только на сегодня" if horizon_days == 0 else f"на <b>{days_ahead(horizon_days)}</b> вперёд"
+    today = (
+        "только на сегодня" if horizon_days == 0 else f"на <b>{days_ahead(horizon_days)}</b> вперёд"
+    )
     return head + (
         "📆 <b>Горизонт записи</b>\n\n"
         f"Сейчас запись открыта {today}: клиенты видят даты "
@@ -619,8 +633,7 @@ def admin_horizon_set(horizon_days: int) -> str:
 
 
 ADMIN_HORIZON_USAGE = (
-    "Укажите число дней от 0 до 365: <code>/horizon 30</code>\n"
-    "0 — запись только на сегодня."
+    "Укажите число дней от 0 до 365: <code>/horizon 30</code>\n0 — запись только на сегодня."
 )
 
 
@@ -641,8 +654,7 @@ ADMIN_CANT_BAN_ADMIN = "Нельзя забанить администратор
 def admin_ban_ask(card: str) -> str:
     return (
         "⛔ <b>Забанить пользователя?</b>\n"
-        "Его предстоящие записи будут отклонены, а бот перестанет ему отвечать.\n\n"
-        + card
+        "Его предстоящие записи будут отклонены, а бот перестанет ему отвечать.\n\n" + card
     )
 
 

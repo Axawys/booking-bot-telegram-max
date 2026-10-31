@@ -78,11 +78,15 @@ def _details(data: dict) -> dict:
     }
 
 
-async def _show_services(msg: Message, state: FSMContext, session: AsyncSession, *, edit: bool) -> None:
+async def _show_services(
+    msg: Message, state: FSMContext, session: AsyncSession, *, edit: bool
+) -> None:
     services = await repo.get_active_services(session)
     if not services:
         await state.clear()
-        await (safe_edit(msg, texts.BOOK_NO_SERVICES) if edit else msg.answer(texts.BOOK_NO_SERVICES))
+        await (
+            safe_edit(msg, texts.BOOK_NO_SERVICES) if edit else msg.answer(texts.BOOK_NO_SERVICES)
+        )
         return
     await state.set_state(BookingForm.service)
     markup = kb.services_kb(services)
@@ -149,7 +153,9 @@ async def _show_times(
         return False
     await state.update_data(day=day.isoformat())
     await state.set_state(BookingForm.time)
-    await safe_edit(msg, texts.book_choose_time(data["service_name"], day, notice), kb.slots_kb(starts))
+    await safe_edit(
+        msg, texts.book_choose_time(data["service_name"], day, notice), kb.slots_kb(starts)
+    )
     return True
 
 
@@ -295,7 +301,9 @@ async def pick_slot(
     starts_at = datetime.combine(day, time(callback_data.hour, callback_data.minute))
 
     busy = await repo.get_unavailable_slots(session, day)
-    if starts_at not in schedule.available_starts(day, data["duration"], busy, schedule.now_local()):
+    if starts_at not in schedule.available_starts(
+        day, data["duration"], busy, schedule.now_local()
+    ):
         await callback.answer(texts.BOOK_SLOT_GONE_ALERT, show_alert=True)
         await _back_to_times(msg, state, session)
         return

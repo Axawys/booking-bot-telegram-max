@@ -1,6 +1,5 @@
 import calendar
-from collections.abc import Iterable
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 
 from aiogram.types import (
@@ -21,10 +20,10 @@ from telegram_bot.callbacks import (
     AdminCalCb,
     AdminDayAction,
     AdminDayCb,
-    HorizonAction,
-    HorizonCb,
     CalendarAction,
     CalendarCb,
+    HorizonAction,
+    HorizonCb,
     MyBookingAction,
     MyBookingCb,
     NavAction,
@@ -32,6 +31,7 @@ from telegram_bot.callbacks import (
     ServiceCb,
     SlotCb,
 )
+
 
 def _reply_kb(rows: list[list[str]], placeholder: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(

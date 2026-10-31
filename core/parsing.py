@@ -5,9 +5,7 @@ from datetime import date, time, timedelta
 
 _DATE = r"(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?"
 _TIME = r"(\d{1,2}):(\d{2})"
-_PERIOD = re.compile(
-    rf"^{_DATE}(?:\s*[-–]\s*{_DATE})?(?:\s+{_TIME}\s*[-–]\s*{_TIME})?$"
-)
+_PERIOD = re.compile(rf"^{_DATE}(?:\s*[-–]\s*{_DATE})?(?:\s+{_TIME}\s*[-–]\s*{_TIME})?$")
 
 MAX_RANGE_DAYS = 366
 

@@ -30,9 +30,7 @@ _DAY_ARG = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$")
 # --- Команды --------------------------------------------------------------
 
 
-@router.message(
-    or_f(Command("admin"), F.text.in_({texts.BTN_ADMIN_HELP, texts.BTN_ADMIN_MODE}))
-)
+@router.message(or_f(Command("admin"), F.text.in_({texts.BTN_ADMIN_HELP, texts.BTN_ADMIN_MODE})))
 async def cmd_admin(message: Message, session: AsyncSession) -> None:
     pending = await repo.count_pending_bookings(session, schedule.now_local())
     await message.answer(

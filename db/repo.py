@@ -46,11 +46,7 @@ def _utcnow() -> datetime:
 
 
 async def get_active_services(session: AsyncSession) -> Sequence[Service]:
-    stmt = (
-        select(Service)
-        .where(Service.is_active)
-        .order_by(Service.sort_order, Service.id)
-    )
+    stmt = select(Service).where(Service.is_active).order_by(Service.sort_order, Service.id)
     return (await session.scalars(stmt)).all()
 
 
@@ -82,9 +78,7 @@ async def upsert_client(
     return client
 
 
-async def get_client(
-    session: AsyncSession, platform: Platform, external_id: int
-) -> Client | None:
+async def get_client(session: AsyncSession, platform: Platform, external_id: int) -> Client | None:
     stmt = select(Client).where(Client.platform == platform, Client.external_id == external_id)
     return await session.scalar(stmt)
 
@@ -527,7 +521,8 @@ async def list_banned(
         .order_by(BannedUser.created_at.desc())
         .limit(limit)
     )
-    return (await session.execute(stmt)).tuples().all()
+    # Row в SQLAlchemy 2.1 ведёт себя как кортеж: (ban, client).
+    return (await session.execute(stmt)).all()
 
 
 # --- Планировщик ----------------------------------------------------------
@@ -535,9 +530,7 @@ async def list_banned(
 
 async def get_schedulable_bookings(session: AsyncSession, now: datetime) -> Sequence[Booking]:
     """Активные записи, которым ещё нужны задачи: напоминания или истечение заявки."""
-    stmt = select(Booking).where(
-        Booking.status.in_(ACTIVE_STATUSES), Booking.starts_at > now
-    )
+    stmt = select(Booking).where(Booking.status.in_(ACTIVE_STATUSES), Booking.starts_at > now)
     return (await session.scalars(stmt)).all()
 
 

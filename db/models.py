@@ -73,9 +73,7 @@ class Client(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[Platform] = mapped_column(_str_enum(Platform, "platform"))
-    external_id: Mapped[int] = mapped_column(
-        BigInteger, comment="ID пользователя в Telegram / MAX"
-    )
+    external_id: Mapped[int] = mapped_column(BigInteger, comment="ID пользователя в Telegram / MAX")
     full_name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())

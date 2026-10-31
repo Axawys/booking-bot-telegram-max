@@ -11,6 +11,7 @@
 Повторную отправку напоминания исключает первичный ключ sent_reminders.
 """
 
+import contextlib
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -94,10 +95,8 @@ class BookingScheduler:
 
     def _remove_jobs(self, booking_id: int) -> None:
         for job_id in self._job_ids(booking_id):
-            try:
+            with contextlib.suppress(JobLookupError):
                 self.scheduler.remove_job(job_id)
-            except JobLookupError:
-                pass
 
     def _add(self, job_id: str, run_at: datetime, func, *args) -> None:
         self.scheduler.add_job(
@@ -112,7 +111,9 @@ class BookingScheduler:
 
         if booking.status == BookingStatus.PENDING:
             created = schedule.utc_to_local(booking.created_at)
-            expire_at = min(created + timedelta(hours=settings.pending_ttl_hours), booking.starts_at)
+            expire_at = min(
+                created + timedelta(hours=settings.pending_ttl_hours), booking.starts_at
+            )
             self._add(
                 f"expire:{booking.id}", max(expire_at, now + _RUN_SOON), self._expire, booking.id
             )
@@ -128,9 +129,7 @@ class BookingScheduler:
                     if not (catch_up and now - run_at <= grace):
                         continue  # время прошло: напоминание уже неактуально
                     run_at = now + _RUN_SOON
-                self._add(
-                    f"remind:{booking.id}:{kind}", run_at, self._remind, booking.id, hours
-                )
+                self._add(f"remind:{booking.id}:{kind}", run_at, self._remind, booking.id, hours)
 
     # --- Задачи -----------------------------------------------------------
 

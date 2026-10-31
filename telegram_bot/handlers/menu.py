@@ -4,10 +4,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import texts
-from db import repo
-from core import schedule
+from core import schedule, texts
 from core.config import settings
+from db import repo
 from telegram_bot.keyboards import admin_menu, client_menu
 
 router = Router(name="menu")

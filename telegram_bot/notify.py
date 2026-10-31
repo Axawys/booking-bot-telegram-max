@@ -18,7 +18,9 @@ from telegram_bot import keyboards as kb
 log = logging.getLogger(__name__)
 
 
-async def send(bot: Bot, chat_id: int, text: str, markup: InlineKeyboardMarkup | None = None) -> bool:
+async def send(
+    bot: Bot, chat_id: int, text: str, markup: InlineKeyboardMarkup | None = None
+) -> bool:
     try:
         await bot.send_message(chat_id, text, reply_markup=markup)
     except (TelegramForbiddenError, TelegramBadRequest) as exc:
