@@ -1,5 +1,7 @@
 # Бот онлайн-записи для Telegram и MAX
 
+[![CI](https://github.com/Axawys/booking-bot-telegram-max/actions/workflows/ci.yml/badge.svg)](https://github.com/Axawys/booking-bot-telegram-max/actions/workflows/ci.yml)
+
 Бот принимает записи клиентов для сервисного бизнеса: салона, мастера, студии, клиники. Клиент сам выбирает услугу, дату и время, оставляет телефон и подтверждает запись. Администратор получает заявку в Telegram, подтверждает или отклоняет её одной кнопкой и управляет расписанием прямо из чата.
 
 Бот работает в двух мессенджерах одновременно: в Telegram и в MAX. У них общая база, общее расписание и общая логика записи, поэтому клиенты из разных мессенджеров не могут занять одно и то же время.
@@ -110,7 +112,7 @@ sudo usermod -aG docker $USER   # чтобы запускать docker без su
 ### 3. Скачать проект и заполнить настройки
 
 ```bash
-git clone <URL-репозитория> booking-bot
+git clone https://github.com/Axawys/booking-bot-telegram-max.git booking-bot
 cd booking-bot
 cp .env.example .env
 nano .env
