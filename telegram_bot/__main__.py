@@ -2,10 +2,12 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from core.config import settings
 from db.session import engine, session_factory
-from telegram_bot.handlers import router
+from telegram_bot.handlers import setup_routers
 from telegram_bot.middlewares import DbSessionMiddleware
 
 
@@ -15,10 +17,13 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    bot = Bot(token=settings.telegram_bot_token.get_secret_value())
+    bot = Bot(
+        token=settings.telegram_bot_token.get_secret_value(),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
     dp = Dispatcher()
     dp.update.middleware(DbSessionMiddleware(session_factory))
-    dp.include_router(router)
+    dp.include_routers(*setup_routers())
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

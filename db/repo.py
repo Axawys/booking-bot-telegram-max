@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.schedule import iter_slot_starts
 from db.models import Booking, BookingSlot, BookingStatus, Client, Platform, Service
 
 
@@ -60,6 +61,13 @@ async def upsert_client(
     return client
 
 
+async def get_client(
+    session: AsyncSession, platform: Platform, external_id: int
+) -> Client | None:
+    stmt = select(Client).where(Client.platform == platform, Client.external_id == external_id)
+    return await session.scalar(stmt)
+
+
 async def set_client_phone(session: AsyncSession, client_id: int, phone: str) -> None:
     await session.execute(update(Client).where(Client.id == client_id).values(phone=phone))
     await session.commit()
@@ -68,22 +76,21 @@ async def set_client_phone(session: AsyncSession, client_id: int, phone: str) ->
 # --- Расписание и записи --------------------------------------------------
 
 
-def iter_slot_starts(starts_at: datetime, ends_at: datetime, slot_minutes: int):
-    step = timedelta(minutes=slot_minutes)
-    current = starts_at
-    while current < ends_at:
-        yield current
-        current += step
+async def get_busy_slots_between(
+    session: AsyncSession, start: datetime, end: datetime
+) -> set[datetime]:
+    """Начала занятых слотов в полуинтервале [start, end)."""
+    stmt = select(BookingSlot.starts_at).where(
+        BookingSlot.starts_at >= start,
+        BookingSlot.starts_at < end,
+    )
+    return set((await session.scalars(stmt)).all())
 
 
 async def get_busy_slots(session: AsyncSession, day: date) -> set[datetime]:
     """Начала всех занятых слотов за день — для построения выбора времени."""
     day_start = datetime.combine(day, time.min)
-    stmt = select(BookingSlot.starts_at).where(
-        BookingSlot.starts_at >= day_start,
-        BookingSlot.starts_at < day_start + timedelta(days=1),
-    )
-    return set((await session.scalars(stmt)).all())
+    return await get_busy_slots_between(session, day_start, day_start + timedelta(days=1))
 
 
 async def create_booking(
