@@ -4,7 +4,7 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timedelta
 from html import escape
 
-from core.schedule import now_local
+from core.schedule import now_local, utc_to_local
 from db.models import Booking, BookingStatus, Client, Platform, Service
 
 # --- Кнопки ---------------------------------------------------------------
@@ -21,6 +21,7 @@ BTN_ADMIN_TODAY = "📅 Сегодня"
 BTN_ADMIN_TOMORROW = "📅 Завтра"
 BTN_ADMIN_SCHEDULE = "🗓 Доступное время"
 BTN_ADMIN_HELP = "❓ Команды"
+BTN_ADMIN_BANS = "⛔ Баны"
 BTN_CLIENT_MODE = "👤 Режим клиента"
 BTN_ADMIN_MODE = "🛠 Режим админа"
 
@@ -139,6 +140,11 @@ CONTACTS = (
 )
 
 UNSUPPORTED = "Этот тип сообщения я пока не умею повторять."
+BANNED = "⛔ Доступ к боту ограничен администратором."
+
+
+def throttled(seconds: int) -> str:
+    return f"⏳ Слишком много действий подряд. Подождите {seconds} сек. и попробуйте снова."
 UNKNOWN_COMMAND = "Неизвестная команда. Главное меню — /start"
 STALE_BUTTON = "Эта кнопка устарела. Начните запись заново — «Записаться»."
 BACK_TO_MENU = "Главное меню 👇"
@@ -194,6 +200,17 @@ BOOK_SLOT_TAKEN = "😔 <b>Это время только что заняли.</
 BOOK_SLOT_CLOSED = "⛔ <b>Это время только что закрыли для записи.</b> Выберите другое:"
 BOOK_OUT_OF_HORIZON = (
     "📅 <b>Запись на эту дату сейчас закрыта.</b> Выберите другую дату:"
+)
+def book_limit_active(limit: int) -> str:
+    word = plural(limit, "активная запись", "активные записи", "активных записей")
+    return (
+        f"У вас уже {limit} {word} — это максимум.\n"
+        "Чтобы записаться ещё, отмените одну из них в «Мои записи»."
+    )
+
+
+BOOK_LIMIT_DAILY = (
+    "Слишком много записей за сутки. Попробуйте позже или позвоните нам: " + PHONE + "."
 )
 BOOK_TOO_LATE = "⏰ <b>Это время уже недоступно для записи.</b> Выберите другое:"
 BOOK_CANCELLED = "✖ Запись отменена. Можно начать заново в любой момент."
@@ -341,7 +358,11 @@ ADMIN_HELP = (
     "/close <code>05.11-10.11</code> — закрыть даты для записи\n"
     "/close <code>05.11 13:00-14:00</code> — закрыть время (можно для диапазона дат)\n"
     "/open <code>05.11-10.11</code> — снова открыть даты или время\n"
-    "/horizon <code>30</code> — на сколько дней вперёд открыта запись\n"
+    "/horizon <code>30</code> — на сколько дней вперёд открыта запись\n\n"
+    "<b>Пользователи</b>\n"
+    "/ban <code>ID причина</code> — забанить (ID есть в карточке заявки)\n"
+    "/unban <code>ID</code> — разбанить\n"
+    "/banned — список забаненных\n"
     "Уже сделанные записи при закрытии сохраняются.\n\n"
     "Новые заявки приходят сюда автоматически, с кнопками подтверждения."
 )
@@ -379,11 +400,14 @@ def client_mention(client: Client) -> str:
     return f"{name} (MAX)"
 
 
-def admin_booking_card(booking: Booking, title: str, decided_by: str | None = None) -> str:
+def admin_booking_card(
+    booking: Booking, title: str, decided_by: str | None = None, note: str | None = None
+) -> str:
     duration = booking.service.duration_minutes
     text = (
         f"{title} <b>#{booking.id}</b>\n\n"
         f"👤 Клиент: {client_mention(booking.client)}\n"
+        f"🆔 ID: <code>{booking.client.external_id}</code>\n"
         f"📞 Телефон: {escape(booking.client.phone or '—')}\n"
         f"💼 Услуга: <b>{escape(booking.service.name)}</b>\n"
         f"📅 Дата: <b>{format_date(booking.starts_at.date())}</b>\n"
@@ -394,6 +418,8 @@ def admin_booking_card(booking: Booking, title: str, decided_by: str | None = No
     )
     if decided_by:
         text += f" · {escape(decided_by)}"
+    if note:
+        text += f"\n{note}"
     return text
 
 
@@ -596,3 +622,69 @@ ADMIN_HORIZON_USAGE = (
     "Укажите число дней от 0 до 365: <code>/horizon 30</code>\n"
     "0 — запись только на сегодня."
 )
+
+
+# --- Администратор: баны --------------------------------------------------
+
+BTN_ADMIN_BAN = "⛔ Бан"
+BTN_ADMIN_BAN_CONFIRM = "⛔ Да, забанить"
+BTN_ADMIN_BAN_BACK = "⬅ Назад"
+
+ADMIN_BAN_USAGE = (
+    "Формат: <code>/ban ID причина</code> — причина необязательна.\n"
+    "ID пользователя есть в карточке заявки (🆔) и в /banned."
+)
+ADMIN_UNBAN_USAGE = "Формат: <code>/unban ID</code>"
+ADMIN_CANT_BAN_ADMIN = "Нельзя забанить администратора."
+
+
+def admin_ban_ask(card: str) -> str:
+    return (
+        "⛔ <b>Забанить пользователя?</b>\n"
+        "Его предстоящие записи будут отклонены, а бот перестанет ему отвечать.\n\n"
+        + card
+    )
+
+
+def _user_label(external_id: int, client: Client | None) -> str:
+    if client is not None:
+        return f"{client_mention(client)} (ID <code>{external_id}</code>)"
+    return f"ID <code>{external_id}</code>"
+
+
+def admin_banned(external_id: int, client: Client | None, rejected: int) -> str:
+    text = f"⛔ {_user_label(external_id, client)} забанен."
+    if rejected:
+        text += f"\nОтклонено предстоящих записей: <b>{rejected}</b>."
+    return text + f"\nРазбанить: <code>/unban {external_id}</code>"
+
+
+def admin_ban_toast(rejected: int) -> str:
+    """Для всплывающего окна — без HTML."""
+    extra = f", отклонено записей: {rejected}" if rejected else ""
+    return f"⛔ Пользователь забанен{extra}"
+
+
+def admin_ban_note(rejected: int) -> str:
+    return f"<b>{admin_ban_toast(rejected)}</b>"
+
+
+def admin_unbanned(external_id: int) -> str:
+    return f"✅ Пользователь <code>{external_id}</code> разбанен."
+
+
+def admin_not_banned(external_id: int) -> str:
+    return f"Пользователь <code>{external_id}</code> не забанен."
+
+
+def admin_banned_list(rows: Sequence[tuple]) -> str:
+    if not rows:
+        return "⛔ <b>Забаненные</b>\n\nСписок пуст."
+    lines = []
+    for ban, client in rows:
+        reason = f" — {escape(ban.reason)}" if ban.reason else ""
+        lines.append(
+            f"• {_user_label(ban.external_id, client)}{reason}\n"
+            f"   с {utc_to_local(ban.created_at):%d.%m.%Y} · <code>/unban {ban.external_id}</code>"
+        )
+    return "⛔ <b>Забаненные</b>\n\n" + "\n".join(lines)

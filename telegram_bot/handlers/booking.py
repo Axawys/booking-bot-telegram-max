@@ -48,6 +48,25 @@ def _menu(user_id: int):
     return kb.client_menu(settings.is_admin(user_id))
 
 
+async def _limit_error(session: AsyncSession, user_id: int) -> str | None:
+    """Антиспам: лимиты на число записей клиента. None — можно записываться.
+
+    Проверка в коде, а не в БД: это политика, а не целостность данных, и
+    в редкой гонке клиент может превысить лимит на одну запись.
+    """
+    if settings.is_admin(user_id):
+        return None
+    client = await repo.get_client(session, Platform.TELEGRAM, user_id)
+    if client is None:
+        return None
+    active = await repo.count_active_bookings(session, client.id, schedule.now_local())
+    if active >= settings.max_active_bookings:
+        return texts.book_limit_active(settings.max_active_bookings)
+    if await repo.count_recent_bookings(session, client.id) >= settings.max_bookings_per_day:
+        return texts.BOOK_LIMIT_DAILY
+    return None
+
+
 def _details(data: dict) -> dict:
     return {
         "service_name": data["service_name"],
@@ -159,6 +178,9 @@ async def _show_summary(msg: Message, state: FSMContext, *, edit: bool) -> None:
 @router.message(F.text == texts.BTN_BOOK)
 async def start_booking(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
+    if error := await _limit_error(session, message.from_user.id):
+        await message.answer(error)
+        return
     await _show_services(message, state, session, edit=False)
 
 
@@ -366,6 +388,13 @@ async def confirm(
         return
 
     user = callback.from_user
+    # Лимиты ещё раз: за время оформления клиент мог записаться в другом окне.
+    if error := await _limit_error(session, user.id):
+        await state.clear()
+        await callback.answer()
+        await safe_edit(msg, error)
+        await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(user.id))
+        return
     client = await repo.upsert_client(session, Platform.TELEGRAM, user.id, user.full_name)
     client_id = client.id
     await repo.set_client_phone(session, client_id, data["phone"])

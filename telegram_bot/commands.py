@@ -26,6 +26,9 @@ ADMIN_COMMANDS = [
     BotCommand(command="close", description="Закрыть даты: /close ДД.ММ-ДД.ММ"),
     BotCommand(command="open", description="Открыть даты: /open ДД.ММ-ДД.ММ"),
     BotCommand(command="horizon", description="На сколько дней вперёд открыта запись"),
+    BotCommand(command="ban", description="Забанить: /ban ID причина"),
+    BotCommand(command="unban", description="Разбанить: /unban ID"),
+    BotCommand(command="banned", description="Список забаненных"),
 ]
 
 

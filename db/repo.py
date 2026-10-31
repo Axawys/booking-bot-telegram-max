@@ -14,6 +14,7 @@ from core.schedule import iter_slot_starts
 from db.models import (
     ACTIVE_STATUSES,
     AppSetting,
+    BannedUser,
     Booking,
     BookingSlot,
     BookingStatus,
@@ -427,3 +428,102 @@ async def get_booking_horizon(session: AsyncSession) -> int:
 
 async def set_booking_horizon(session: AsyncSession, days: int) -> None:
     await set_setting(session, HORIZON_KEY, str(days))
+
+
+# --- Антиспам: лимиты записей ---------------------------------------------
+
+
+async def count_active_bookings(session: AsyncSession, client_id: int, now: datetime) -> int:
+    stmt = select(func.count()).where(
+        Booking.client_id == client_id,
+        Booking.status.in_(ACTIVE_STATUSES),
+        Booking.starts_at > now,
+    )
+    return await session.scalar(stmt)
+
+
+async def count_recent_bookings(session: AsyncSession, client_id: int, hours: int = 24) -> int:
+    """Сколько записей клиент создал за последние hours часов, включая отменённые."""
+    since = _utcnow() - timedelta(hours=hours)
+    stmt = select(func.count()).where(Booking.client_id == client_id, Booking.created_at >= since)
+    return await session.scalar(stmt)
+
+
+# --- Баны -----------------------------------------------------------------
+
+
+async def is_banned(session: AsyncSession, platform: Platform, external_id: int) -> bool:
+    stmt = select(BannedUser.external_id).where(
+        BannedUser.platform == platform, BannedUser.external_id == external_id
+    )
+    return await session.scalar(stmt) is not None
+
+
+async def ban_user(
+    session: AsyncSession,
+    platform: Platform,
+    external_id: int,
+    reason: str | None,
+    banned_by: int,
+    now: datetime,
+) -> int:
+    """Забанить и отклонить все предстоящие записи пользователя (слоты освобождаются).
+
+    Возвращает число отклонённых записей. Повторный бан обновляет причину.
+    """
+    reason = reason[:255] if reason else None
+    stmt = (
+        sqlite_insert(BannedUser)
+        .values(platform=platform, external_id=external_id, reason=reason, banned_by=banned_by)
+        .on_conflict_do_update(
+            index_elements=[BannedUser.platform, BannedUser.external_id],
+            set_={"reason": reason, "banned_by": banned_by},
+        )
+    )
+    await session.execute(stmt)
+
+    bookings = (
+        await session.scalars(
+            select(Booking)
+            .join(Client)
+            .where(
+                Client.platform == platform,
+                Client.external_id == external_id,
+                Booking.status.in_(ACTIVE_STATUSES),
+                Booking.starts_at > now,
+            )
+            .options(selectinload(Booking.slots))
+        )
+    ).all()
+    for booking in bookings:
+        booking.status = BookingStatus.REJECTED
+        booking.cancelled_at = _utcnow()
+        booking.slots.clear()
+    await session.commit()
+    return len(bookings)
+
+
+async def unban_user(session: AsyncSession, platform: Platform, external_id: int) -> bool:
+    result = await session.execute(
+        delete(BannedUser).where(
+            BannedUser.platform == platform, BannedUser.external_id == external_id
+        )
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def list_banned(
+    session: AsyncSession, limit: int = 50
+) -> Sequence[tuple[BannedUser, Client | None]]:
+    stmt = (
+        select(BannedUser, Client)
+        .outerjoin(
+            Client,
+            (Client.platform == BannedUser.platform)
+            & (Client.external_id == BannedUser.external_id),
+        )
+        .order_by(BannedUser.created_at.desc())
+        .limit(limit)
+    )
+    return (await session.execute(stmt)).tuples().all()

@@ -4,7 +4,7 @@
 """
 
 from collections.abc import Iterable, Iterator
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from core.config import settings
@@ -12,6 +12,11 @@ from core.config import settings
 
 def now_local() -> datetime:
     return datetime.now(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+
+
+def utc_to_local(value: datetime) -> datetime:
+    """Служебные метки (created_at и т. п.) хранятся в UTC — для показа переводим."""
+    return value.replace(tzinfo=UTC).astimezone(ZoneInfo(settings.timezone)).replace(tzinfo=None)
 
 
 def iter_slot_starts(

@@ -55,7 +55,7 @@ admin_menu = _reply_kb(
         [texts.BTN_ADMIN_PENDING, texts.BTN_ADMIN_STATS],
         [texts.BTN_ADMIN_TODAY, texts.BTN_ADMIN_TOMORROW],
         [texts.BTN_ADMIN_SCHEDULE, texts.BTN_ADMIN_HELP],
-        [texts.BTN_CLIENT_MODE],
+        [texts.BTN_ADMIN_BANS, texts.BTN_CLIENT_MODE],
     ],
     "Админ-панель",
 )
@@ -195,6 +195,24 @@ def admin_decision_kb(booking_id: int) -> InlineKeyboardMarkup:
     builder.button(
         text=texts.BTN_ADMIN_REJECT,
         callback_data=AdminBookingCb(action=AdminAction.REJECT, booking_id=booking_id),
+    )
+    builder.button(
+        text=texts.BTN_ADMIN_BAN,
+        callback_data=AdminBookingCb(action=AdminAction.BAN_ASK, booking_id=booking_id),
+    )
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+def admin_ban_confirm_kb(booking_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_ADMIN_BAN_CONFIRM,
+        callback_data=AdminBookingCb(action=AdminAction.BAN, booking_id=booking_id),
+    )
+    builder.button(
+        text=texts.BTN_ADMIN_BAN_BACK,
+        callback_data=AdminBookingCb(action=AdminAction.BACK, booking_id=booking_id),
     )
     return builder.as_markup()
 

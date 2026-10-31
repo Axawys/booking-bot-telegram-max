@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     # Минимум минут между «сейчас» и началом записи.
     booking_min_lead_minutes: int = 60
 
+    # --- Антиспам (на админов не действует) ---
+    # Не больше rate_limit_messages действий за rate_limit_window_seconds,
+    # иначе пауза rate_limit_cooldown_seconds.
+    rate_limit_messages: int = 20
+    rate_limit_window_seconds: int = 10
+    rate_limit_cooldown_seconds: int = 30
+    # Лимиты записей на одного клиента.
+    max_active_bookings: int = 3
+    max_bookings_per_day: int = 5
+
     @field_validator("admin_ids", mode="before")
     @classmethod
     def _split_admin_ids(cls, value: object) -> object:

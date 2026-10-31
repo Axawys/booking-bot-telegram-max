@@ -9,7 +9,7 @@ from core.config import settings
 from db.session import engine, session_factory
 from telegram_bot.commands import setup_commands
 from telegram_bot.handlers import setup_routers
-from telegram_bot.middlewares import DbSessionMiddleware
+from telegram_bot.middlewares import BanMiddleware, DbSessionMiddleware, ThrottlingMiddleware
 
 
 async def main() -> None:
@@ -23,7 +23,16 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+    # Порядок: антифлуд (в памяти, до БД) -> сессия БД -> проверка бана.
+    dp.update.outer_middleware(
+        ThrottlingMiddleware(
+            limit=settings.rate_limit_messages,
+            window=settings.rate_limit_window_seconds,
+            cooldown=settings.rate_limit_cooldown_seconds,
+        )
+    )
     dp.update.middleware(DbSessionMiddleware(session_factory))
+    dp.update.middleware(BanMiddleware())
     dp.include_routers(*setup_routers())
 
     try:

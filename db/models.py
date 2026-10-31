@@ -165,3 +165,19 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         server_default=func.current_timestamp(), onupdate=func.current_timestamp()
     )
+
+
+class BannedUser(Base):
+    """Пользователь, которому админ закрыл доступ к боту.
+
+    Хранится по (платформа, ID), а не по clients.id: забанить можно и того,
+    кто ещё ни разу не записывался.
+    """
+
+    __tablename__ = "banned_users"
+
+    platform: Mapped[Platform] = mapped_column(_str_enum(Platform, "platform"), primary_key=True)
+    external_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reason: Mapped[str | None] = mapped_column(String(255))
+    banned_by: Mapped[int | None] = mapped_column(BigInteger, comment="ID админа")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())

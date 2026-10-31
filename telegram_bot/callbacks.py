@@ -51,6 +51,9 @@ class MyBookingCb(CallbackData, prefix="my"):
 class AdminAction(StrEnum):
     CONFIRM = "confirm"
     REJECT = "reject"
+    BAN_ASK = "ban_ask"
+    BAN = "ban"
+    BACK = "back"
 
 
 class AdminBookingCb(CallbackData, prefix="adm"):
