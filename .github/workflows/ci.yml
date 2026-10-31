@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Новый пуш в ту же ветку отменяет устаревший прогон.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13" # как в Dockerfile
+  # Фиктивный токен: в CI бот не подключается к Telegram.
+  TELEGRAM_BOT_TOKEN: "123456:ci-dummy-token"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Ruff check
+        run: ruff check --output-format=github .
+      - name: Ruff format
+        run: ruff format --check .
+
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest
+
+  migrations:
+    name: Migrations (alembic)
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: sqlite+aiosqlite:///./ci-migrations.db
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Upgrade to head
+        run: alembic upgrade head
+      - name: Models match migrations
+        run: alembic check
+      - name: Downgrade to base and upgrade again
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  docker:
+    name: Docker image
+    needs: [lint, test, migrations]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate compose.yml
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: booking-bot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test (migrations + imports inside the image)
+        run: >
+          docker run --rm -e TELEGRAM_BOT_TOKEN booking-bot:ci
+          sh -c "alembic upgrade head && python -c 'import telegram_bot.__main__'"

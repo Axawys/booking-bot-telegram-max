@@ -11,3 +11,8 @@ __pycache__
 .pytest_cache
 .idea
 .vscode
+data
+tests
+.github
+requirements-dev.txt
+pyproject.toml
