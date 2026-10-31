@@ -1,6 +1,5 @@
 import logging
 import time
-from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core import texts
 from core.config import settings
+from core.ratelimit import RateLimiter, Verdict
 from db import repo
 from db.models import Platform
 
@@ -41,9 +41,8 @@ class ThrottlingMiddleware(BaseMiddleware):
     При превышении пользователь «остывает» `cooldown` секунд: апдейты
     отбрасываются, предупреждение отправляется один раз. Счётчики в памяти —
     флуд отсекается до любых запросов к БД. Админов не ограничивает.
+    Сам счётчик общий с MAX-ботом: core.ratelimit.RateLimiter.
     """
-
-    CLEANUP_EVERY = 1000
 
     def __init__(
         self,
@@ -52,47 +51,22 @@ class ThrottlingMiddleware(BaseMiddleware):
         cooldown: float,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self.limit, self.window, self.cooldown, self.clock = limit, window, cooldown, clock
-        self.hits: dict[int, deque[float]] = {}
-        self.blocked_until: dict[int, float] = {}
-        self._calls = 0
+        self.limiter = RateLimiter(limit, window, cooldown, clock)
 
     async def __call__(self, handler: Handler, event: TelegramObject, data: dict[str, Any]) -> Any:
         user = _user(data)
         if user is None or settings.is_admin(user.id):
             return await handler(event, data)
 
-        now = self.clock()
-        self._maybe_cleanup(now)
-
-        until = self.blocked_until.get(user.id)
-        if until is not None:
-            if now < until:
+        match self.limiter.hit(user.id):
+            case Verdict.ALLOW:
+                return await handler(event, data)
+            case Verdict.WARN:
+                log.warning("Флуд от пользователя %s: пауза %s с", user.id, self.limiter.cooldown)
+                await _reply(event, texts.throttled(int(self.limiter.cooldown)))
+            case Verdict.DROP:
                 await _stop_spinner(event)
-                return None
-            del self.blocked_until[user.id]
-
-        hits = self.hits.setdefault(user.id, deque())
-        while hits and hits[0] <= now - self.window:
-            hits.popleft()
-        hits.append(now)
-
-        if len(hits) > self.limit:
-            self.blocked_until[user.id] = now + self.cooldown
-            hits.clear()
-            log.warning("Флуд от пользователя %s: пауза %s с", user.id, self.cooldown)
-            await _reply(event, texts.throttled(int(self.cooldown)))
-            return None
-        return await handler(event, data)
-
-    def _maybe_cleanup(self, now: float) -> None:
-        self._calls += 1
-        if self._calls % self.CLEANUP_EVERY:
-            return
-        for user_id in [u for u, h in self.hits.items() if not h or h[-1] <= now - self.window]:
-            del self.hits[user_id]
-        for user_id in [u for u, t in self.blocked_until.items() if t <= now]:
-            del self.blocked_until[user_id]
+        return None
 
 
 class BanMiddleware(BaseMiddleware):

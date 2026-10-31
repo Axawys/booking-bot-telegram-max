@@ -1,14 +1,11 @@
-"""Сценарий записи: услуга → дата → время → телефон → подтверждение.
+"""Сценарий записи в Telegram: услуга → дата → время → телефон → подтверждение.
 
-Свободность времени проверяется в коде только ради удобства (не показывать
-занятое и закрытое админом). Гарантию даёт БД: уникальный индекс booking_slots
-от двойной записи и триггер от записи на закрытое время. Например,
-если два клиента подтвердят одно время одновременно, второй получит
-SlotAlreadyBookedError и вернётся к выбору времени.
+Что показать и можно ли записаться, решает общий core.booking_service (его же
+использует MAX-бот); здесь — только кнопки и сообщения Telegram. Гарантию от
+двойной записи и записи на закрытое время даёт БД (см. db.repo).
 """
 
-import calendar
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -16,7 +13,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import schedule, texts
+from core import booking_service as service
+from core import texts
 from core.config import settings
 from core.phone import normalize_phone
 from db import repo
@@ -47,25 +45,6 @@ router.callback_query.filter(AccessibleMessage())
 def _menu(user_id: int):
     """Клиентское меню; админу — с кнопкой возврата в админку."""
     return kb.client_menu(settings.is_admin(user_id))
-
-
-async def _limit_error(session: AsyncSession, user_id: int) -> str | None:
-    """Антиспам: лимиты на число записей клиента. None — можно записываться.
-
-    Проверка в коде, а не в БД: это политика, а не целостность данных, и
-    в редкой гонке клиент может превысить лимит на одну запись.
-    """
-    if settings.is_admin(user_id):
-        return None
-    client = await repo.get_client(session, Platform.TELEGRAM, user_id)
-    if client is None:
-        return None
-    active = await repo.count_active_bookings(session, client.id, schedule.now_local())
-    if active >= settings.max_active_bookings:
-        return texts.book_limit_active(settings.max_active_bookings)
-    if await repo.count_recent_bookings(session, client.id) >= settings.max_bookings_per_day:
-        return texts.BOOK_LIMIT_DAILY
-    return None
 
 
 def _details(data: dict) -> dict:
@@ -105,40 +84,12 @@ async def _show_calendar(
     notice: str | None = None,
 ) -> None:
     data = await state.get_data()
-    now = schedule.now_local()
-    first, last = schedule.bookable_range(now, await repo.get_booking_horizon(session))
-    if year is None or month is None:
-        year, month = first.year, first.month
-
-    month_start = date(year, month, 1)
-    month_end = date(year, month, calendar.monthrange(year, month)[1])
-    lo, hi = max(first, month_start), min(last, month_end)
-
-    available: set[date] = set()
-    if lo <= hi:
-        # Один запрос на весь видимый диапазон вместо запроса на каждый день.
-        busy = await repo.get_unavailable_slots_between(
-            session,
-            datetime.combine(lo, time.min),
-            datetime.combine(hi + timedelta(days=1), time.min),
-        )
-        day = lo
-        while day <= hi:
-            if schedule.available_starts(day, data["duration"], busy, now):
-                available.add(day)
-            day += timedelta(days=1)
-
+    view = await service.month_view(session, data["duration"], year, month)
     await state.set_state(BookingForm.date)
     await safe_edit(
         msg,
         texts.book_choose_date(data["service_name"], notice),
-        kb.calendar_kb(
-            year,
-            month,
-            available,
-            can_prev=(year, month) > (first.year, first.month),
-            can_next=(year, month) < (last.year, last.month),
-        ),
+        kb.calendar_kb(view.year, view.month, view.available, view.can_prev, view.can_next),
     )
 
 
@@ -147,8 +98,7 @@ async def _show_times(
 ) -> bool:
     """Показать свободное время на день. False — если свободного времени нет."""
     data = await state.get_data()
-    busy = await repo.get_unavailable_slots(session, day)
-    starts = schedule.available_starts(day, data["duration"], busy, schedule.now_local())
+    starts = await service.free_starts(session, day, data["duration"])
     if not starts:
         return False
     await state.update_data(day=day.isoformat())
@@ -185,7 +135,7 @@ async def _show_summary(msg: Message, state: FSMContext, *, edit: bool) -> None:
 @router.message(F.text == texts.BTN_BOOK)
 async def start_booking(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
-    if error := await _limit_error(session, message.from_user.id):
+    if error := await service.limit_error(session, Platform.TELEGRAM, message.from_user.id):
         await message.answer(error)
         return
     await _show_services(message, state, session, edit=False)
@@ -264,8 +214,7 @@ async def pick_day(
     session: AsyncSession,
 ) -> None:
     day = date(callback_data.year, callback_data.month, callback_data.day)
-    horizon = await repo.get_booking_horizon(session)
-    if not schedule.is_bookable_day(day, schedule.now_local(), horizon):
+    if not await service.is_day_open(session, day):
         await callback.answer(texts.BOOK_DAY_UNAVAILABLE_ALERT, show_alert=True)
         await _show_calendar(msg, state, session)
         return
@@ -300,10 +249,7 @@ async def pick_slot(
     day = date.fromisoformat(data["day"])
     starts_at = datetime.combine(day, time(callback_data.hour, callback_data.minute))
 
-    busy = await repo.get_unavailable_slots(session, day)
-    if starts_at not in schedule.available_starts(
-        day, data["duration"], busy, schedule.now_local()
-    ):
+    if starts_at not in await service.free_starts(session, day, data["duration"]):
         await callback.answer(texts.BOOK_SLOT_GONE_ALERT, show_alert=True)
         await _back_to_times(msg, state, session)
         return
@@ -385,71 +331,45 @@ async def confirm(
     scheduler: BookingScheduler,
 ) -> None:
     data = await state.get_data()
-    starts_at = datetime.fromisoformat(data["starts_at"])
-
-    # Пока клиент думал, время могло стать слишком близким или прошедшим.
-    now = schedule.now_local()
-    earliest = now + timedelta(minutes=settings.booking_min_lead_minutes)
-    if starts_at < earliest:
-        await callback.answer()
-        await _back_to_times(msg, state, session, texts.BOOK_TOO_LATE)
-        return
-    # ...или админ сократил горизонт записи.
-    horizon = await repo.get_booking_horizon(session)
-    if not schedule.is_bookable_day(starts_at.date(), now, horizon):
-        await callback.answer()
-        await _show_calendar(msg, state, session, notice=texts.BOOK_OUT_OF_HORIZON)
-        return
-
     user = callback.from_user
-    # Лимиты ещё раз: за время оформления клиент мог записаться в другом окне.
-    if error := await _limit_error(session, user.id):
-        await state.clear()
-        await callback.answer()
-        await safe_edit(msg, error)
-        await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(user.id))
-        return
-    client = await repo.upsert_client(session, Platform.TELEGRAM, user.id, user.full_name)
-    client_id = client.id
-    await repo.set_client_phone(session, client_id, data["phone"])
+    result = await service.place_booking(
+        session,
+        platform=Platform.TELEGRAM,
+        user_id=user.id,
+        full_name=user.full_name,
+        service_id=data["service_id"],
+        starts_at=datetime.fromisoformat(data["starts_at"]),
+        phone=data["phone"],
+    )
+    await callback.answer("✅ Готово!" if result.outcome == service.Outcome.CREATED else None)
 
-    # Если есть администраторы — заявка ждёт их подтверждения, но слоты
-    # занимаются сразу: время уже не достанется другому клиенту.
-    status = BookingStatus.PENDING if settings.requires_confirmation else BookingStatus.CONFIRMED
-    try:
-        booking = await repo.create_booking(
-            session, client_id, data["service_id"], starts_at, settings.slot_minutes, status
-        )
-    except repo.SlotAlreadyBookedError:
-        # Сработал уникальный индекс: кто-то успел занять это время раньше.
-        await callback.answer()
-        await _back_to_times(msg, state, session, texts.BOOK_SLOT_TAKEN)
-        return
-    except repo.SlotClosedError:
-        # Сработал триггер: админ закрыл это время, пока клиент оформлял запись.
-        await callback.answer()
-        await _back_to_times(msg, state, session, texts.BOOK_SLOT_CLOSED)
-        return
-    except ValueError:
-        await state.clear()
-        await callback.answer()
-        await safe_edit(msg, texts.BOOK_ERROR)
-        await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(callback.from_user.id))
-        return
-
-    booking_id = booking.id
-    await state.clear()
-    await callback.answer("✅ Готово!")
-    if status == BookingStatus.PENDING:
-        await safe_edit(msg, texts.book_pending(**_details(data)))
-    else:
-        await safe_edit(msg, texts.book_success(**_details(data)))
-    await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(callback.from_user.id))
-
-    if settings.admin_ids:
-        await notify.notify_admins_new_booking(bot, await repo.get_booking(session, booking_id))
-    # Напоминания (запись подтверждена) или истечение заявки (ждёт админа).
-    await scheduler.sync_booking(booking_id)
+    match result.outcome:
+        case service.Outcome.CREATED:
+            await state.clear()
+            if result.status == BookingStatus.PENDING:
+                await safe_edit(msg, texts.book_pending(**_details(data)))
+            else:
+                await safe_edit(msg, texts.book_success(**_details(data)))
+            await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(user.id))
+            if settings.admin_ids:
+                booking = await repo.get_booking(session, result.booking_id)
+                await notify.notify_admins_new_booking(bot, booking)
+            # Напоминания (запись подтверждена) или истечение заявки (ждёт админа).
+            await scheduler.sync_booking(result.booking_id)
+        # Пока клиент думал, время стало слишком близким или его заняли/закрыли:
+        # уникальный индекс и триггер в БД — последняя линия защиты.
+        case service.Outcome.TOO_LATE:
+            await _back_to_times(msg, state, session, texts.BOOK_TOO_LATE)
+        case service.Outcome.SLOT_TAKEN:
+            await _back_to_times(msg, state, session, texts.BOOK_SLOT_TAKEN)
+        case service.Outcome.SLOT_CLOSED:
+            await _back_to_times(msg, state, session, texts.BOOK_SLOT_CLOSED)
+        case service.Outcome.OUT_OF_HORIZON:
+            await _show_calendar(msg, state, session, notice=texts.BOOK_OUT_OF_HORIZON)
+        case service.Outcome.LIMIT | service.Outcome.SERVICE_GONE:
+            await state.clear()
+            await safe_edit(msg, result.message or texts.BOOK_ERROR)
+            await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(user.id))
 
 
 @router.callback_query(BookingForm.confirm, NavCb.filter(F.action == NavAction.BACK))
