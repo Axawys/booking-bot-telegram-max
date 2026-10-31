@@ -27,10 +27,11 @@ from alembic.config import Config  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 from db.session import engine, session_factory  # noqa: E402
+from notifications.notifier import Notifier  # noqa: E402
+from notifications.scheduler import BookingScheduler  # noqa: E402
 from telegram_bot.handlers import setup_routers  # noqa: E402
 from telegram_bot.middlewares import BanMiddleware, DbSessionMiddleware  # noqa: E402
-from telegram_bot.scheduler import BookingScheduler  # noqa: E402
-from tests.helpers import FakeTelegram, TgUser  # noqa: E402
+from tests.helpers import FakeMaxApi, FakeTelegram, MaxUser, TgUser  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 # Дочерние таблицы — раньше родительских.
@@ -77,8 +78,18 @@ def bot(api: FakeTelegram) -> Bot:
 
 
 @pytest.fixture
-async def scheduler(bot: Bot):  # async: AsyncIOScheduler нужен работающий event loop
-    sched = BookingScheduler(bot, session_factory)
+def max_api() -> FakeMaxApi:
+    return FakeMaxApi()
+
+
+@pytest.fixture
+def notifier(bot: Bot, max_api: FakeMaxApi) -> Notifier:
+    return Notifier(bot, max_api)
+
+
+@pytest.fixture
+async def scheduler(notifier: Notifier):  # async: AsyncIOScheduler нужен работающий event loop
+    sched = BookingScheduler(notifier, session_factory)
     sched.scheduler.start(paused=True)  # задачи планируются, но не срабатывают сами
     yield sched
     sched.shutdown()
@@ -99,10 +110,11 @@ def _dispatcher() -> Dispatcher:
 
 
 @pytest.fixture
-def dp(_dispatcher: Dispatcher, scheduler: BookingScheduler) -> Dispatcher:
+def dp(_dispatcher: Dispatcher, scheduler: BookingScheduler, notifier: Notifier) -> Dispatcher:
     _dispatcher.storage.storage.clear()
     _ban_middleware.last_notice.clear()
     _dispatcher["scheduler"] = scheduler
+    _dispatcher["notifier"] = notifier
     return _dispatcher
 
 
@@ -117,3 +129,19 @@ def user(dp: Dispatcher, bot: Bot, api: FakeTelegram):
 @pytest.fixture
 def admin(user) -> TgUser:
     return user(99, "Админ")
+
+
+@pytest.fixture
+def max_bot(max_api: FakeMaxApi, notifier: Notifier):
+    from core.ratelimit import RateLimiter
+    from max_bot.bot import MaxBot
+
+    return MaxBot(max_api, notifier, session_factory, RateLimiter(100, 10, 30))
+
+
+@pytest.fixture
+def max_user(max_bot, max_api: FakeMaxApi):
+    def make(user_id: int, name: str = "Клиент MAX") -> MaxUser:
+        return MaxUser(max_bot, max_api, user_id, name)
+
+    return make

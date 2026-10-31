@@ -7,10 +7,12 @@ from aiogram.enums import ParseMode
 
 from core.config import settings
 from db.session import engine, session_factory
+from max_bot.api import MaxApi
+from notifications.notifier import Notifier
+from notifications.scheduler import BookingScheduler
 from telegram_bot.commands import setup_commands
 from telegram_bot.handlers import setup_routers
 from telegram_bot.middlewares import BanMiddleware, DbSessionMiddleware, ThrottlingMiddleware
-from telegram_bot.scheduler import BookingScheduler
 
 
 async def main() -> None:
@@ -36,9 +38,19 @@ async def main() -> None:
     dp.update.middleware(BanMiddleware())
     dp.include_routers(*setup_routers())
 
-    # Задачи планировщика пересоздаются из БД при каждом старте.
-    scheduler = BookingScheduler(bot, session_factory)
-    dp["scheduler"] = scheduler  # доступен в хендлерах как аргумент `scheduler`
+    # Клиентам MAX уведомления (решение админа, напоминания) уходят через MAX API.
+    max_api = (
+        MaxApi(settings.max_bot_token.get_secret_value(), settings.max_api_url)
+        if settings.max_bot_token
+        else None
+    )
+    notifier = Notifier(bot, max_api)
+    # Планировщик один на систему: задачи пересоздаются из БД при каждом старте
+    # и регулярно сверяются с ней (записи из MAX-бота).
+    scheduler = BookingScheduler(notifier, session_factory)
+    # Доступны в хендлерах как аргументы `notifier` и `scheduler`.
+    dp["notifier"] = notifier
+    dp["scheduler"] = scheduler
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
@@ -47,6 +59,8 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         scheduler.shutdown()
+        if max_api is not None:
+            await max_api.close()
         await engine.dispose()
 
 

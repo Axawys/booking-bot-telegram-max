@@ -3,7 +3,7 @@
 import re
 from datetime import date, datetime, time, timedelta
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, or_f
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,11 +12,11 @@ from core import schedule, texts
 from core.config import settings
 from db import repo
 from db.models import BookingStatus, Platform
+from notifications.notifier import Notifier
+from notifications.scheduler import BookingScheduler
 from telegram_bot import keyboards as kb
-from telegram_bot import notify
 from telegram_bot.callbacks import AdminAction, AdminBookingCb
 from telegram_bot.filters import AccessibleMessage, IsAdmin
-from telegram_bot.scheduler import BookingScheduler
 from telegram_bot.utils import safe_edit
 
 router = Router(name="admin")
@@ -119,7 +119,7 @@ async def decide(
     callback_data: AdminBookingCb,
     msg: Message,
     session: AsyncSession,
-    bot: Bot,
+    notifier: Notifier,
     scheduler: BookingScheduler,
 ) -> None:
     approve = callback_data.action == AdminAction.CONFIRM
@@ -140,7 +140,7 @@ async def decide(
         msg,
         texts.admin_booking_card(booking, texts.ADMIN_TITLE_PENDING, callback.from_user.full_name),
     )
-    await notify.notify_client_decision(bot, booking)
+    await notifier.decision(booking)
     await callback.answer(texts.ADMIN_CONFIRMED_ALERT if approve else texts.ADMIN_REJECTED_ALERT)
     # Подтверждена — запланировать напоминания; отклонена — снять задачи.
     await scheduler.sync_booking(booking.id)
@@ -215,43 +215,48 @@ async def ban_from_card(
 # --- Команды банов --------------------------------------------------------
 
 
-def _parse_user_id(args: str | None) -> tuple[int | None, str | None]:
+def _parse_user(args: str | None) -> tuple[Platform, int | None, str | None]:
+    """«123 причина» — Telegram, «max 123 причина» — MAX."""
     parts = (args or "").strip().split(maxsplit=1)
+    platform = Platform.TELEGRAM
+    if parts and parts[0].lower() == "max":
+        platform = Platform.MAX
+        parts = parts[1].split(maxsplit=1) if len(parts) > 1 else []
     if not parts or not parts[0].isdigit():
-        return None, None
-    return int(parts[0]), (parts[1].strip() if len(parts) > 1 else None)
+        return platform, None, None
+    return platform, int(parts[0]), (parts[1].strip() if len(parts) > 1 else None)
 
 
 @router.message(Command("ban"))
 async def cmd_ban(
     message: Message, command: CommandObject, session: AsyncSession, scheduler: BookingScheduler
 ) -> None:
-    user_id, reason = _parse_user_id(command.args)
+    platform, user_id, reason = _parse_user(command.args)
     if user_id is None:
         await message.answer(texts.ADMIN_BAN_USAGE)
         return
-    if settings.is_admin(user_id):
+    if platform == Platform.TELEGRAM and settings.is_admin(user_id):
         await message.answer(texts.ADMIN_CANT_BAN_ADMIN)
         return
     rejected_ids = await repo.ban_user(
-        session, Platform.TELEGRAM, user_id, reason, message.from_user.id, schedule.now_local()
+        session, platform, user_id, reason, message.from_user.id, schedule.now_local()
     )
-    client = await repo.get_client(session, Platform.TELEGRAM, user_id)
-    await message.answer(texts.admin_banned(user_id, client, len(rejected_ids)))
+    client = await repo.get_client(session, platform, user_id)
+    await message.answer(texts.admin_banned(platform, user_id, client, len(rejected_ids)))
     for booking_id in rejected_ids:
         await scheduler.sync_booking(booking_id)
 
 
 @router.message(Command("unban"))
 async def cmd_unban(message: Message, command: CommandObject, session: AsyncSession) -> None:
-    user_id, _ = _parse_user_id(command.args)
+    platform, user_id, _ = _parse_user(command.args)
     if user_id is None:
         await message.answer(texts.ADMIN_UNBAN_USAGE)
         return
-    if await repo.unban_user(session, Platform.TELEGRAM, user_id):
-        await message.answer(texts.admin_unbanned(user_id))
+    if await repo.unban_user(session, platform, user_id):
+        await message.answer(texts.admin_unbanned(platform, user_id))
     else:
-        await message.answer(texts.admin_not_banned(user_id))
+        await message.answer(texts.admin_not_banned(platform, user_id))
 
 
 @router.message(or_f(Command("banned"), F.text == texts.BTN_ADMIN_BANS))

@@ -1,11 +1,41 @@
+# Один образ — три сервиса:
+#   migrate      — применяет миграции и завершается;
+#   telegram-bot — Telegram-бот, админка и планировщик задач (один на систему);
+#   max-bot      — MAX-бот для клиентов.
+# Боты стартуют только после успешных миграций, поэтому два процесса не
+# мигрируют SQLite одновременно. База общая — том bot-data.
+
+x-app: &app
+  build: .
+  image: booking-bot
+  env_file: .env
+  volumes:
+    - bot-data:/app/data
+
 services:
+  migrate:
+    <<: *app
+    command: alembic upgrade head
+    restart: "no"
+
   telegram-bot:
-    build: .
+    <<: *app
     container_name: booking-telegram-bot
-    env_file: .env
-    volumes:
-      - bot-data:/app/data
+    command: python -m telegram_bot
     restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  max-bot:
+    <<: *app
+    container_name: booking-max-bot
+    command: python -m max_bot
+    # Без MAX_BOT_TOKEN бот завершается штатно (код 0) и не перезапускается.
+    restart: on-failure
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   bot-data:

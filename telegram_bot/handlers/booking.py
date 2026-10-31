@@ -7,7 +7,7 @@
 
 from datetime import date, datetime, time
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
@@ -19,8 +19,9 @@ from core.config import settings
 from core.phone import normalize_phone
 from db import repo
 from db.models import BookingStatus, Platform
+from notifications.notifier import Notifier
+from notifications.scheduler import BookingScheduler
 from telegram_bot import keyboards as kb
-from telegram_bot import notify
 from telegram_bot.callbacks import (
     NOOP,
     CalendarAction,
@@ -31,7 +32,6 @@ from telegram_bot.callbacks import (
     SlotCb,
 )
 from telegram_bot.filters import AccessibleMessage
-from telegram_bot.scheduler import BookingScheduler
 from telegram_bot.states import BookingForm
 from telegram_bot.utils import safe_edit
 
@@ -327,7 +327,7 @@ async def confirm(
     msg: Message,
     state: FSMContext,
     session: AsyncSession,
-    bot: Bot,
+    notifier: Notifier,
     scheduler: BookingScheduler,
 ) -> None:
     data = await state.get_data()
@@ -351,9 +351,7 @@ async def confirm(
             else:
                 await safe_edit(msg, texts.book_success(**_details(data)))
             await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(user.id))
-            if settings.admin_ids:
-                booking = await repo.get_booking(session, result.booking_id)
-                await notify.notify_admins_new_booking(bot, booking)
+            await notifier.new_booking(await repo.get_booking(session, result.booking_id))
             # Напоминания (запись подтверждена) или истечение заявки (ждёт админа).
             await scheduler.sync_booking(result.booking_id)
         # Пока клиент думал, время стало слишком близким или его заняли/закрыли:

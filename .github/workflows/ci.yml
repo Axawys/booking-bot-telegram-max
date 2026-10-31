@@ -98,4 +98,4 @@ jobs:
       - name: Smoke test (migrations + imports inside the image)
         run: >
           docker run --rm -e TELEGRAM_BOT_TOKEN booking-bot:ci
-          sh -c "alembic upgrade head && python -c 'import telegram_bot.__main__'"
+          sh -c "alembic upgrade head && python -c 'import telegram_bot.__main__, max_bot.__main__'"

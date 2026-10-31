@@ -9,7 +9,8 @@ from core import schedule
 from db import repo
 from db.models import BookingStatus, Platform
 from db.session import session_factory
-from telegram_bot.scheduler import BookingScheduler
+from notifications.notifier import Notifier
+from notifications.scheduler import BookingScheduler
 
 
 def _align(dt):
@@ -46,7 +47,7 @@ async def bookings(session):
 
 
 async def _restored(bot) -> BookingScheduler:
-    sched = BookingScheduler(bot, session_factory)
+    sched = BookingScheduler(Notifier(bot), session_factory)
     sched.scheduler.start(paused=True)
     await sched.restore()
     return sched

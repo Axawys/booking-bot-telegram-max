@@ -372,7 +372,8 @@ ADMIN_HELP = (
     "/open <code>05.11-10.11</code> — снова открыть даты или время\n"
     "/horizon <code>30</code> — на сколько дней вперёд открыта запись\n\n"
     "<b>Пользователи</b>\n"
-    "/ban <code>ID причина</code> — забанить (ID есть в карточке заявки)\n"
+    "/ban <code>ID причина</code> — забанить (ID есть в карточке заявки; "
+    "для MAX — <code>/ban max ID</code>)\n"
     "/unban <code>ID</code> — разбанить\n"
     "/banned — список забаненных\n"
     "Уже сделанные записи при закрытии сохраняются.\n\n"
@@ -407,6 +408,11 @@ def admin_pending_count(count: int) -> str:
     return f"⏳ Ожидают подтверждения: <b>{count}</b> — /pending"
 
 
+def user_ref(platform: Platform, external_id: int) -> str:
+    """Как указать пользователя в /ban и /unban: «123» или «max 123»."""
+    return f"max {external_id}" if platform == Platform.MAX else str(external_id)
+
+
 def client_mention(client: Client) -> str:
     name = escape(client.full_name)
     if client.platform == Platform.TELEGRAM:
@@ -421,7 +427,7 @@ def admin_booking_card(
     text = (
         f"{title} <b>#{booking.id}</b>\n\n"
         f"👤 Клиент: {client_mention(booking.client)}\n"
-        f"🆔 ID: <code>{booking.client.external_id}</code>\n"
+        f"🆔 ID: <code>{user_ref(booking.client.platform, booking.client.external_id)}</code>\n"
         f"📞 Телефон: {escape(booking.client.phone or '—')}\n"
         f"💼 Услуга: <b>{escape(booking.service.name)}</b>\n"
         f"📅 Дата: <b>{format_date(booking.starts_at.date())}</b>\n"
@@ -645,9 +651,10 @@ BTN_ADMIN_BAN_BACK = "⬅ Назад"
 
 ADMIN_BAN_USAGE = (
     "Формат: <code>/ban ID причина</code> — причина необязательна.\n"
+    "Пользователь MAX: <code>/ban max ID причина</code>.\n"
     "ID пользователя есть в карточке заявки (🆔) и в /banned."
 )
-ADMIN_UNBAN_USAGE = "Формат: <code>/unban ID</code>"
+ADMIN_UNBAN_USAGE = "Формат: <code>/unban ID</code> или <code>/unban max ID</code>"
 ADMIN_CANT_BAN_ADMIN = "Нельзя забанить администратора."
 
 
@@ -658,17 +665,16 @@ def admin_ban_ask(card: str) -> str:
     )
 
 
-def _user_label(external_id: int, client: Client | None) -> str:
-    if client is not None:
-        return f"{client_mention(client)} (ID <code>{external_id}</code>)"
-    return f"ID <code>{external_id}</code>"
+def _user_label(platform: Platform, external_id: int, client: Client | None) -> str:
+    ref = f"ID <code>{user_ref(platform, external_id)}</code>"
+    return f"{client_mention(client)} ({ref})" if client is not None else ref
 
 
-def admin_banned(external_id: int, client: Client | None, rejected: int) -> str:
-    text = f"⛔ {_user_label(external_id, client)} забанен."
+def admin_banned(platform: Platform, external_id: int, client: Client | None, rejected: int) -> str:
+    text = f"⛔ {_user_label(platform, external_id, client)} забанен."
     if rejected:
         text += f"\nОтклонено предстоящих записей: <b>{rejected}</b>."
-    return text + f"\nРазбанить: <code>/unban {external_id}</code>"
+    return text + f"\nРазбанить: <code>/unban {user_ref(platform, external_id)}</code>"
 
 
 def admin_ban_toast(rejected: int) -> str:
@@ -681,12 +687,12 @@ def admin_ban_note(rejected: int) -> str:
     return f"<b>{admin_ban_toast(rejected)}</b>"
 
 
-def admin_unbanned(external_id: int) -> str:
-    return f"✅ Пользователь <code>{external_id}</code> разбанен."
+def admin_unbanned(platform: Platform, external_id: int) -> str:
+    return f"✅ Пользователь <code>{user_ref(platform, external_id)}</code> разбанен."
 
 
-def admin_not_banned(external_id: int) -> str:
-    return f"Пользователь <code>{external_id}</code> не забанен."
+def admin_not_banned(platform: Platform, external_id: int) -> str:
+    return f"Пользователь <code>{user_ref(platform, external_id)}</code> не забанен."
 
 
 def admin_banned_list(rows: Sequence[tuple]) -> str:
@@ -696,8 +702,9 @@ def admin_banned_list(rows: Sequence[tuple]) -> str:
     for ban, client in rows:
         reason = f" — {escape(ban.reason)}" if ban.reason else ""
         lines.append(
-            f"• {_user_label(ban.external_id, client)}{reason}\n"
-            f"   с {utc_to_local(ban.created_at):%d.%m.%Y} · <code>/unban {ban.external_id}</code>"
+            f"• {_user_label(ban.platform, ban.external_id, client)}{reason}\n"
+            f"   с {utc_to_local(ban.created_at):%d.%m.%Y} · "
+            f"<code>/unban {user_ref(ban.platform, ban.external_id)}</code>"
         )
     return "⛔ <b>Забаненные</b>\n\n" + "\n".join(lines)
 

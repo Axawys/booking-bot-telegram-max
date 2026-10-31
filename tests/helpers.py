@@ -158,3 +158,146 @@ class TgUser:
         await self.click(self.callbacks("slot:")[slot])
         await self.send(phone)
         return await self.click("nav:confirm")
+
+
+# --- MAX ------------------------------------------------------------------
+
+
+class FakeMaxApi:
+    """Подмена max_bot.api.MaxApi: запоминает вызовы вместо HTTP-запросов."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.keyboards: dict[str, list] = {}  # mid -> клавиатура
+        self.texts: dict[str, str] = {}  # mid -> текст
+        self.owner: dict[str, int] = {}  # mid -> user_id
+        self._mids = itertools.count(1)
+
+    async def send_message(self, user_id: int, text: str, keyboard=None) -> str:
+        mid = f"mid.{next(self._mids)}"
+        self.calls.append(("send", user_id, text, keyboard))
+        self.keyboards[mid], self.texts[mid], self.owner[mid] = keyboard or [], text, user_id
+        return mid
+
+    async def edit_message(self, mid: str, text: str, keyboard=None) -> None:
+        self.calls.append(("edit", mid, text, keyboard))
+        self.keyboards[mid], self.texts[mid] = keyboard or [], text
+
+    async def answer_callback(self, callback_id, *, text=None, keyboard=None, notification=None):
+        mid = callback_id.split("|", 1)[1]  # в тестах callback_id = «N|mid»
+        self.calls.append(("answer", mid, text, keyboard, notification))
+        if text is not None:
+            self.keyboards[mid], self.texts[mid] = keyboard or [], text
+
+    def sent_to(self, user_id: int, since: int = 0) -> list[str]:
+        return [c[2] for c in self.calls[since:] if c[0] == "send" and c[1] == user_id]
+
+
+def max_texts(calls: list[tuple]) -> list[str]:
+    """Тексты новых/изменённых сообщений и всплывающих уведомлений."""
+    out = []
+    for c in calls:
+        if c[0] in ("send", "edit") or (c[0] == "answer" and c[2] is not None):
+            out.append(c[2])
+        if c[0] == "answer" and c[4]:
+            out.append(c[4])
+    return out
+
+
+class MaxUser:
+    """Пользователь MAX в личном диалоге с ботом."""
+
+    def __init__(self, bot, api: FakeMaxApi, user_id: int, name: str = "Клиент"):
+        self.bot, self.api, self.id = bot, api, user_id
+        self.user = {"user_id": user_id, "first_name": name, "is_bot": False}
+
+    def _messages(self) -> list[str]:
+        return [mid for mid, owner in self.api.owner.items() if owner == self.id]
+
+    def buttons(self) -> list[dict]:
+        """Кнопки самого свежего сообщения с клавиатурой."""
+        for mid in reversed(self._messages()):
+            if self.api.keyboards.get(mid):
+                return [b for row in self.api.keyboards[mid] for b in row]
+        return []
+
+    def payloads(self, prefix: str) -> list[str]:
+        return [b["payload"] for b in self.buttons() if b.get("payload", "").startswith(prefix)]
+
+    def button(self, text_prefix: str) -> str:
+        return next(b["payload"] for b in self.buttons() if b["text"].startswith(text_prefix))
+
+    async def _feed(self, update: dict) -> list[tuple]:
+        start = len(self.api.calls)
+        await self.bot.handle(update)
+        return self.api.calls[start:]
+
+    async def start(self) -> list[tuple]:
+        return await self._feed(
+            {"update_type": "bot_started", "timestamp": 0, "chat_id": self.id, "user": self.user}
+        )
+
+    async def send(self, text: str = "", vcf: str | None = None, chat_type: str = "dialog"):
+        attachments = (
+            [{"type": "contact", "payload": {"vcf_info": vcf, "max_info": self.user}}]
+            if vcf
+            else []
+        )
+        return await self._feed(
+            {
+                "update_type": "message_created",
+                "timestamp": 0,
+                "message": {
+                    "sender": self.user,
+                    "recipient": {"chat_type": chat_type, "user_id": 1},
+                    "timestamp": 0,
+                    "body": {
+                        "mid": f"u.{next(_ids)}",
+                        "seq": 1,
+                        "text": text,
+                        "attachments": attachments,
+                    },
+                },
+            }
+        )
+
+    async def click(self, payload: str) -> list[tuple]:
+        # Нажимаем в том сообщении, где есть такая кнопка (иначе — в последнем).
+        mids = self._messages()
+        mid = next(
+            (
+                m
+                for m in reversed(mids)
+                if any(
+                    b.get("payload") == payload
+                    for row in self.api.keyboards.get(m, [])
+                    for b in row
+                )
+            ),
+            mids[-1] if mids else "mid.0",
+        )
+        return await self._feed(
+            {
+                "update_type": "message_callback",
+                "timestamp": 0,
+                "callback": {
+                    "timestamp": 0,
+                    "callback_id": f"{next(_ids)}|{mid}",
+                    "payload": payload,
+                    "user": self.user,
+                },
+                "message": {"recipient": {"chat_type": "dialog"}, "body": {"mid": mid, "seq": 1}},
+            }
+        )
+
+    async def book(
+        self, service: str = "Услуга за 500", slot: int = 0, phone: str = "+79005556677"
+    ):
+        await self.click("menu:book")
+        await self.click(self.button(service))
+        await self.click(self.payloads("cal:day:")[0])
+        await self.click(self.payloads("slot:")[slot])
+        await self.send(
+            vcf=f"BEGIN:VCARD\nVERSION:3.0\nTEL;TYPE=cell:{phone.lstrip('+')}\nEND:VCARD"
+        )
+        return await self.click("nav:confirm")

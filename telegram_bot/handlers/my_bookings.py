@@ -4,7 +4,7 @@
 в БД — отменить можно только свою, подтверждённую и ещё не начавшуюся запись.
 """
 
-from aiogram import Bot, F, Router
+from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,11 +12,11 @@ from core import schedule, texts
 from core.config import settings
 from db import repo
 from db.models import Platform
+from notifications.notifier import Notifier
+from notifications.scheduler import BookingScheduler
 from telegram_bot import keyboards as kb
-from telegram_bot import notify
 from telegram_bot.callbacks import MyBookingAction, MyBookingCb
 from telegram_bot.filters import AccessibleMessage
-from telegram_bot.scheduler import BookingScheduler
 from telegram_bot.utils import safe_edit
 
 router = Router(name="my_bookings")
@@ -79,7 +79,7 @@ async def do_cancel(
     callback_data: MyBookingCb,
     msg: Message,
     session: AsyncSession,
-    bot: Bot,
+    notifier: Notifier,
     scheduler: BookingScheduler,
 ) -> None:
     user_id = callback.from_user.id
@@ -105,4 +105,4 @@ async def do_cancel(
     await scheduler.sync_booking(callback_data.booking_id)
     if settings.admin_ids:
         cancelled = await repo.get_booking(session, callback_data.booking_id)
-        await notify.notify_admins_cancelled(bot, cancelled)
+        await notifier.cancelled_by_client(cancelled)

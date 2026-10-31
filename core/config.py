@@ -10,6 +10,11 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr
 
+    # MAX: токен из business.max.ru (Чат-боты → Настройки). Без него MAX-бот
+    # не запускается, а клиентам MAX не уходят уведомления из Telegram-процесса.
+    max_bot_token: SecretStr | None = None
+    max_api_url: str = "https://platform-api2.max.ru"
+
     # Telegram ID администраторов через запятую: ADMIN_IDS=123,456.
     # Если список пуст, записи подтверждаются сразу, без участия админа.
     admin_ids: Annotated[list[int], NoDecode] = []
@@ -50,6 +55,9 @@ class Settings(BaseSettings):
     pending_ttl_hours: int = 12
     # Время утренней сводки для админов; пусто — не отправлять.
     admin_digest_time: time | None = time(9, 0)
+    # Как часто планировщик сверяет задачи с БД: так он узнаёт о записях,
+    # созданных или изменённых в другом процессе (MAX-боте).
+    scheduler_resync_seconds: int = 60
 
     @field_validator("admin_ids", "reminder_hours", mode="before")
     @classmethod
@@ -58,9 +66,9 @@ class Settings(BaseSettings):
             return [int(part) for part in value.replace(" ", "").split(",") if part]
         return value
 
-    @field_validator("admin_digest_time", mode="before")
+    @field_validator("admin_digest_time", "max_bot_token", mode="before")
     @classmethod
-    def _empty_time_is_none(cls, value: object) -> object:
+    def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
 
     @property
