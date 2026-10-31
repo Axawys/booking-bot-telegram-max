@@ -35,3 +35,14 @@ class NavAction(StrEnum):
 
 class NavCb(CallbackData, prefix="nav"):
     action: NavAction
+
+
+class MyBookingAction(StrEnum):
+    LIST = "list"
+    ASK = "ask"
+    CANCEL = "cancel"
+
+
+class MyBookingCb(CallbackData, prefix="my"):
+    action: MyBookingAction
+    booking_id: int = 0

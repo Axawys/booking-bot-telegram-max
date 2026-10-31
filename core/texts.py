@@ -1,10 +1,10 @@
 """Тексты бота. Общие для Telegram и MAX, разметка — HTML."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timedelta
 from html import escape
 
-from db.models import Service
+from db.models import Booking, Service
 
 # --- Кнопки ---------------------------------------------------------------
 
@@ -82,10 +82,6 @@ START = (
     "Выбери нужный пункт в меню ниже 👇"
 )
 
-MY_BOOKINGS = (
-    "📋 <b>Мои записи</b>\n\n"
-    "<i>Просмотр, перенос и отмена записей — в разработке.</i>"
-)
 
 
 def services_list(services: Iterable[Service]) -> str:
@@ -188,5 +184,60 @@ def book_success(**details) -> str:
         "✅ <b>Вы записаны!</b>\n\n"
         + _booking_details(**details)
         + f"\n\n📍 Ждём вас по адресу: {ADDRESS}.\n"
-        f"Если планы изменятся — позвоните нам: {PHONE}."
+        "Если планы изменятся, отменить запись можно в разделе «Мои записи»."
     )
+
+
+# --- Мои записи -----------------------------------------------------------
+
+BTN_CANCEL_BOOKING_YES = "✖ Да, отменить"
+BTN_KEEP_BOOKING = "⬅ Нет, оставить"
+
+MY_BOOKING_CANCELLED_ALERT = "Запись отменена"
+MY_BOOKING_NOT_FOUND_ALERT = "Запись не найдена: она уже отменена или уже началась."
+
+
+def _when(booking: Booking) -> str:
+    return (
+        f"{format_date(booking.starts_at.date())}, "
+        f"{booking.starts_at:%H:%M}–{booking.ends_at:%H:%M}"
+    )
+
+
+def btn_cancel_booking(booking: Booking) -> str:
+    starts_at = booking.starts_at
+    return (
+        f"✖ {starts_at.day} {MONTHS_GEN[starts_at.month - 1]}, {starts_at:%H:%M}"
+        f" · {booking.service.name}"
+    )
+
+
+def my_bookings_list(bookings: Sequence[Booking], notice: str | None = None) -> str:
+    head = f"{notice}\n\n" if notice else ""
+    if not bookings:
+        return (
+            head + "📋 <b>Мои записи</b>\n\n"
+            "У вас нет предстоящих записей.\n"
+            "Чтобы записаться, нажмите «Записаться» в меню."
+        )
+    items = [
+        f"{i}. <b>{_when(b)}</b>\n    {escape(b.service.name)}"
+        for i, b in enumerate(bookings, start=1)
+    ]
+    return (
+        head + "📋 <b>Мои записи</b>\n\n"
+        + "\n\n".join(items)
+        + "\n\nЧтобы отменить запись, нажмите на неё ниже."
+    )
+
+
+def my_booking_cancel_ask(booking: Booking) -> str:
+    return (
+        "❓ <b>Отменить запись?</b>\n\n"
+        f"💼 Услуга: <b>{escape(booking.service.name)}</b>\n"
+        f"📅 Когда: <b>{_when(booking)}</b>"
+    )
+
+
+def my_booking_cancelled(booking: Booking) -> str:
+    return f"✅ Запись на <b>{_when(booking)}</b> отменена."

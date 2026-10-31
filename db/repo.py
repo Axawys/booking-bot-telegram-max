@@ -159,14 +159,37 @@ async def get_upcoming_bookings(
     return (await session.scalars(stmt)).all()
 
 
-async def cancel_booking(session: AsyncSession, booking_id: int, client_id: int) -> bool:
-    """Отменить запись клиента и освободить её слоты. False — если отменять нечего."""
+async def get_upcoming_booking(
+    session: AsyncSession, booking_id: int, client_id: int, now: datetime
+) -> Booking | None:
+    """Предстоящая подтверждённая запись, только если она принадлежит клиенту."""
     stmt = (
         select(Booking)
         .where(
             Booking.id == booking_id,
             Booking.client_id == client_id,
             Booking.status == BookingStatus.CONFIRMED,
+            Booking.starts_at > now,
+        )
+        .options(selectinload(Booking.service))
+    )
+    return await session.scalar(stmt)
+
+
+async def cancel_booking(
+    session: AsyncSession, booking_id: int, client_id: int, now: datetime
+) -> bool:
+    """Отменить предстоящую запись клиента и освободить её слоты.
+
+    False — если отменять нечего: запись чужая, уже отменена или уже началась.
+    """
+    stmt = (
+        select(Booking)
+        .where(
+            Booking.id == booking_id,
+            Booking.client_id == client_id,
+            Booking.status == BookingStatus.CONFIRMED,
+            Booking.starts_at > now,
         )
         .options(selectinload(Booking.slots))
     )

@@ -1,5 +1,6 @@
 import calendar
 from collections.abc import Iterable
+from collections.abc import Sequence
 from datetime import date, datetime
 
 from aiogram.types import (
@@ -11,11 +12,13 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from core import texts
-from db.models import Service
+from db.models import Booking, Service
 from telegram_bot.callbacks import (
     NOOP,
     CalendarAction,
     CalendarCb,
+    MyBookingAction,
+    MyBookingCb,
     NavAction,
     NavCb,
     ServiceCb,
@@ -127,3 +130,28 @@ def confirm_kb() -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+def my_bookings_kb(bookings: Sequence[Booking]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for booking in bookings:
+        builder.button(
+            text=texts.btn_cancel_booking(booking),
+            callback_data=MyBookingCb(action=MyBookingAction.ASK, booking_id=booking.id),
+        )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def my_booking_cancel_kb(booking_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_CANCEL_BOOKING_YES,
+        callback_data=MyBookingCb(action=MyBookingAction.CANCEL, booking_id=booking_id),
+    )
+    builder.button(
+        text=texts.BTN_KEEP_BOOKING,
+        callback_data=MyBookingCb(action=MyBookingAction.LIST),
+    )
+    builder.adjust(1)
+    return builder.as_markup()

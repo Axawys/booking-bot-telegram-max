@@ -18,11 +18,6 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await message.answer(texts.START.format(name=name), reply_markup=main_menu)
 
 
-@router.message(F.text == texts.BTN_MY_BOOKINGS)
-async def my_bookings(message: Message) -> None:
-    await message.answer(texts.MY_BOOKINGS)
-
-
 @router.message(F.text == texts.BTN_SERVICES)
 async def services(message: Message, session: AsyncSession) -> None:
     items = await repo.get_active_services(session)

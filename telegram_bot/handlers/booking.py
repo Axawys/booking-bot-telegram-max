@@ -10,15 +10,9 @@ import calendar
 from datetime import date, datetime, time, timedelta
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    Message,
-    ReplyKeyboardRemove,
-)
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import schedule, texts
@@ -38,21 +32,13 @@ from telegram_bot.callbacks import (
 )
 from telegram_bot.filters import AccessibleMessage
 from telegram_bot.states import BookingForm
+from telegram_bot.utils import safe_edit
 
 router = Router(name="booking")
 router.callback_query.filter(AccessibleMessage())
 
 
 # --- Вспомогательные функции ----------------------------------------------
-
-
-async def _edit(msg: Message, text: str, markup: InlineKeyboardMarkup | None = None) -> None:
-    """edit_text, который не падает, если содержимое не изменилось."""
-    try:
-        await msg.edit_text(text, reply_markup=markup)
-    except TelegramBadRequest as exc:
-        if "message is not modified" not in str(exc):
-            raise
 
 
 def _details(data: dict) -> dict:
@@ -69,12 +55,12 @@ async def _show_services(msg: Message, state: FSMContext, session: AsyncSession,
     services = await repo.get_active_services(session)
     if not services:
         await state.clear()
-        await (_edit(msg, texts.BOOK_NO_SERVICES) if edit else msg.answer(texts.BOOK_NO_SERVICES))
+        await (safe_edit(msg, texts.BOOK_NO_SERVICES) if edit else msg.answer(texts.BOOK_NO_SERVICES))
         return
     await state.set_state(BookingForm.service)
     markup = kb.services_kb(services)
     if edit:
-        await _edit(msg, texts.BOOK_CHOOSE_SERVICE, markup)
+        await safe_edit(msg, texts.BOOK_CHOOSE_SERVICE, markup)
     else:
         await msg.answer(texts.BOOK_CHOOSE_SERVICE, reply_markup=markup)
 
@@ -107,7 +93,7 @@ async def _show_calendar(
             day += timedelta(days=1)
 
     await state.set_state(BookingForm.date)
-    await _edit(
+    await safe_edit(
         msg,
         texts.book_choose_date(data["service_name"]),
         kb.calendar_kb(
@@ -131,7 +117,7 @@ async def _show_times(
         return False
     await state.update_data(day=day.isoformat())
     await state.set_state(BookingForm.time)
-    await _edit(msg, texts.book_choose_time(data["service_name"], day, notice), kb.slots_kb(starts))
+    await safe_edit(msg, texts.book_choose_time(data["service_name"], day, notice), kb.slots_kb(starts))
     return True
 
 
@@ -150,7 +136,7 @@ async def _show_summary(msg: Message, state: FSMContext, *, edit: bool) -> None:
     await state.set_state(BookingForm.confirm)
     text = texts.book_summary(**_details(data))
     if edit:
-        await _edit(msg, text, kb.confirm_kb())
+        await safe_edit(msg, text, kb.confirm_kb())
     else:
         await msg.answer(text, reply_markup=kb.confirm_kb())
 
@@ -175,7 +161,7 @@ async def cancel_by_text(message: Message, state: FSMContext) -> None:
 async def cancel_by_button(callback: CallbackQuery, msg: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
-    await _edit(msg, texts.BOOK_CANCELLED)
+    await safe_edit(msg, texts.BOOK_CANCELLED)
     # На шаге телефона главное меню было заменено — вернуть его.
     if data.get("menu_hidden"):
         await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
@@ -286,7 +272,7 @@ async def pick_slot(
         await _show_summary(msg, state, edit=True)
         return
 
-    await _edit(msg, texts.book_picked(data["service_name"], starts_at))
+    await safe_edit(msg, texts.book_picked(data["service_name"], starts_at))
     client = await repo.get_client(session, Platform.TELEGRAM, callback.from_user.id)
     saved_phone = client.phone if client else None
     await state.update_data(saved_phone=saved_phone, menu_hidden=True)
@@ -374,13 +360,13 @@ async def confirm(
     except ValueError:
         await state.clear()
         await callback.answer()
-        await _edit(msg, texts.BOOK_ERROR)
+        await safe_edit(msg, texts.BOOK_ERROR)
         await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
         return
 
     await state.clear()
     await callback.answer("✅ Готово!")
-    await _edit(msg, texts.book_success(**_details(data)))
+    await safe_edit(msg, texts.book_success(**_details(data)))
     await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
 
 
