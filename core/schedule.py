@@ -60,14 +60,19 @@ def available_starts(
     return result
 
 
-def bookable_range(now: datetime) -> tuple[date, date]:
-    """Первый и последний день, на которые открыта запись."""
+# Пределы горизонта записи, который задаёт админ.
+MIN_HORIZON_DAYS = 0  # 0 — запись только на сегодня
+MAX_HORIZON_DAYS = 365
+
+
+def bookable_range(now: datetime, horizon_days: int) -> tuple[date, date]:
+    """Первый и последний день, на которые открыта запись (включительно)."""
     first = now.date()
-    return first, first + timedelta(days=settings.booking_horizon_days)
+    return first, first + timedelta(days=horizon_days)
 
 
-def is_bookable_day(day: date, now: datetime) -> bool:
-    first, last = bookable_range(now)
+def is_bookable_day(day: date, now: datetime, horizon_days: int) -> bool:
+    first, last = bookable_range(now, horizon_days)
     return first <= day <= last
 
 

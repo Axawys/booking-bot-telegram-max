@@ -11,7 +11,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from core import texts
+from core import schedule, texts
 from db.models import Booking, Service
 from telegram_bot.callbacks import (
     NOOP,
@@ -21,6 +21,8 @@ from telegram_bot.callbacks import (
     AdminCalCb,
     AdminDayAction,
     AdminDayCb,
+    HorizonAction,
+    HorizonCb,
     CalendarAction,
     CalendarCb,
     MyBookingAction,
@@ -202,7 +204,12 @@ _SLOT_MARK = {texts.SLOT_OPEN: "✅", texts.SLOT_CLOSED: "🚫", texts.SLOT_BOOK
 
 
 def admin_calendar_kb(
-    year: int, month: int, states: dict[date, str], can_prev: bool, can_next: bool
+    year: int,
+    month: int,
+    states: dict[date, str],
+    can_prev: bool,
+    can_next: bool,
+    horizon_days: int,
 ) -> InlineKeyboardMarkup:
     """Календарь админа. states — состояние каждого доступного дня; остальные дни — «·»."""
     builder = InlineKeyboardBuilder()
@@ -230,6 +237,12 @@ def admin_calendar_kb(
                 InlineKeyboardButton(text=f"{_DAY_MARK[state]}{day}", callback_data=cb.pack())
             )
         builder.row(*row)
+    builder.row(
+        InlineKeyboardButton(
+            text=texts.BTN_HORIZON.format(days=texts.days_ahead(horizon_days)),
+            callback_data=HorizonCb(action=HorizonAction.SHOW).pack(),
+        )
+    )
     return builder.as_markup()
 
 
@@ -268,6 +281,24 @@ def admin_day_kb(
             text=texts.BTN_ADMIN_TO_CALENDAR,
             callback_data=AdminCalCb(
                 action=AdminCalAction.NAV, year=day.year, month=day.month
+            ).pack(),
+        )
+    )
+    return builder.as_markup()
+
+
+def horizon_kb(current: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for days in texts.HORIZON_PRESETS:
+        label = f"• {days} •" if days == current else str(days)
+        builder.button(text=label, callback_data=HorizonCb(action=HorizonAction.SET, days=days))
+    builder.adjust(len(texts.HORIZON_PRESETS))
+    today = schedule.now_local().date()
+    builder.row(
+        InlineKeyboardButton(
+            text=texts.BTN_ADMIN_TO_CALENDAR,
+            callback_data=AdminCalCb(
+                action=AdminCalAction.NAV, year=today.year, month=today.month
             ).pack(),
         )
     )

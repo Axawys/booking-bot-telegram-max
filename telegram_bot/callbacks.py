@@ -84,3 +84,13 @@ class AdminDayCb(CallbackData, prefix="aday"):
     day: int
     hour: int = 0
     minute: int = 0
+
+
+class HorizonAction(StrEnum):
+    SHOW = "show"
+    SET = "set"
+
+
+class HorizonCb(CallbackData, prefix="hz"):
+    action: HorizonAction
+    days: int = 0

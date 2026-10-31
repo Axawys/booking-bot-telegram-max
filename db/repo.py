@@ -9,9 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.config import settings
 from core.schedule import iter_slot_starts
 from db.models import (
     ACTIVE_STATUSES,
+    AppSetting,
     Booking,
     BookingSlot,
     BookingStatus,
@@ -393,3 +395,35 @@ async def get_slot_booking(session: AsyncSession, starts_at: datetime) -> Bookin
         .options(selectinload(Booking.client), selectinload(Booking.service))
     )
     return await session.scalar(stmt)
+
+
+# --- Настройки ------------------------------------------------------------
+
+HORIZON_KEY = "booking_horizon_days"
+
+
+async def get_setting(session: AsyncSession, key: str) -> str | None:
+    return await session.scalar(select(AppSetting.value).where(AppSetting.key == key))
+
+
+async def set_setting(session: AsyncSession, key: str, value: str) -> None:
+    stmt = (
+        sqlite_insert(AppSetting)
+        .values(key=key, value=value)
+        .on_conflict_do_update(
+            index_elements=[AppSetting.key],
+            set_={"value": value, "updated_at": func.current_timestamp()},
+        )
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def get_booking_horizon(session: AsyncSession) -> int:
+    """На сколько дней вперёд открыта запись: значение админа или из .env."""
+    value = await get_setting(session, HORIZON_KEY)
+    return int(value) if value is not None else settings.booking_horizon_days
+
+
+async def set_booking_horizon(session: AsyncSession, days: int) -> None:
+    await set_setting(session, HORIZON_KEY, str(days))

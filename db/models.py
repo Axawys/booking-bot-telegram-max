@@ -150,3 +150,18 @@ class ClosedSlot(Base):
 
     starts_at: Mapped[datetime] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
+
+
+class AppSetting(Base):
+    """Настройки, которые админ меняет из бота (ключ → значение).
+
+    Если ключа нет, используется значение по умолчанию из .env (core.config).
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )

@@ -73,11 +73,16 @@ async def _show_services(msg: Message, state: FSMContext, session: AsyncSession,
 
 
 async def _show_calendar(
-    msg: Message, state: FSMContext, session: AsyncSession, year: int | None = None, month: int | None = None
+    msg: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    year: int | None = None,
+    month: int | None = None,
+    notice: str | None = None,
 ) -> None:
     data = await state.get_data()
     now = schedule.now_local()
-    first, last = schedule.bookable_range(now)
+    first, last = schedule.bookable_range(now, await repo.get_booking_horizon(session))
     if year is None or month is None:
         year, month = first.year, first.month
 
@@ -102,7 +107,7 @@ async def _show_calendar(
     await state.set_state(BookingForm.date)
     await safe_edit(
         msg,
-        texts.book_choose_date(data["service_name"]),
+        texts.book_choose_date(data["service_name"], notice),
         kb.calendar_kb(
             year,
             month,
@@ -230,7 +235,8 @@ async def pick_day(
     session: AsyncSession,
 ) -> None:
     day = date(callback_data.year, callback_data.month, callback_data.day)
-    if not schedule.is_bookable_day(day, schedule.now_local()):
+    horizon = await repo.get_booking_horizon(session)
+    if not schedule.is_bookable_day(day, schedule.now_local(), horizon):
         await callback.answer(texts.BOOK_DAY_UNAVAILABLE_ALERT, show_alert=True)
         await _show_calendar(msg, state, session)
         return
@@ -315,7 +321,9 @@ async def phone_from_contact(message: Message, state: FSMContext) -> None:
     await _accept_phone(message, state, phone)
 
 
-@router.message(BookingForm.phone, F.text)
+# Команды на шаге телефона не считаются номером: /start и /cancel обработаны
+# раньше, остальные получат «Неизвестная команда».
+@router.message(BookingForm.phone, F.text, ~F.text.startswith("/"))
 async def phone_from_text(message: Message, state: FSMContext) -> None:
     saved_phone = (await state.get_data()).get("saved_phone")
     if saved_phone and message.text == texts.btn_use_saved_phone(saved_phone):
@@ -328,7 +336,7 @@ async def phone_from_text(message: Message, state: FSMContext) -> None:
     await _accept_phone(message, state, phone)
 
 
-@router.message(BookingForm.phone)
+@router.message(BookingForm.phone, ~F.text.startswith("/"))
 async def phone_invalid(message: Message) -> None:
     await message.answer(texts.BOOK_PHONE_INVALID)
 
@@ -344,10 +352,17 @@ async def confirm(
     starts_at = datetime.fromisoformat(data["starts_at"])
 
     # Пока клиент думал, время могло стать слишком близким или прошедшим.
-    earliest = schedule.now_local() + timedelta(minutes=settings.booking_min_lead_minutes)
+    now = schedule.now_local()
+    earliest = now + timedelta(minutes=settings.booking_min_lead_minutes)
     if starts_at < earliest:
         await callback.answer()
         await _back_to_times(msg, state, session, texts.BOOK_TOO_LATE)
+        return
+    # ...или админ сократил горизонт записи.
+    horizon = await repo.get_booking_horizon(session)
+    if not schedule.is_bookable_day(starts_at.date(), now, horizon):
+        await callback.answer()
+        await _show_calendar(msg, state, session, notice=texts.BOOK_OUT_OF_HORIZON)
         return
 
     user = callback.from_user

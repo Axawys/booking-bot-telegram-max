@@ -65,6 +65,19 @@ def format_duration(minutes: int) -> str:
     return " ".join(parts)
 
 
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """plural(1, "день", "дня", "дней") -> "день"; 3 -> "дня"; 11 -> "дней"."""
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def days_ahead(n: int) -> str:
+    return f"{n} {plural(n, 'день', 'дня', 'дней')}"
+
+
 def rub(amount: int) -> str:
     """1500 -> '1 500 ₽' (неразрывные пробелы, чтобы цена не переносилась)."""
     return f"{amount:,}".replace(",", " ") + " ₽"
@@ -136,12 +149,13 @@ BOOK_NO_SERVICES = "Сейчас нет доступных услуг для з�
 BOOK_CHOOSE_SERVICE = "✍️ <b>Запись</b> · шаг 1 из 4\n\nВыберите услугу:"
 
 
-def book_choose_date(service_name: str) -> str:
-    return (
+def book_choose_date(service_name: str, notice: str | None = None) -> str:
+    text = (
         "📅 <b>Запись</b> · шаг 2 из 4\n\n"
         f"Услуга: <b>{escape(service_name)}</b>\n"
         "Выберите дату. Дни без свободного времени отмечены «·»."
     )
+    return f"{notice}\n\n{text}" if notice else text
 
 
 def book_choose_time(service_name: str, day: date, notice: str | None = None) -> str:
@@ -178,6 +192,9 @@ BOOK_DAY_UNAVAILABLE_ALERT = "На эту дату запись недоступ
 BOOK_SLOT_GONE_ALERT = "Это время уже недоступно. Выберите другое."
 BOOK_SLOT_TAKEN = "😔 <b>Это время только что заняли.</b> Выберите другое:"
 BOOK_SLOT_CLOSED = "⛔ <b>Это время только что закрыли для записи.</b> Выберите другое:"
+BOOK_OUT_OF_HORIZON = (
+    "📅 <b>Запись на эту дату сейчас закрыта.</b> Выберите другую дату:"
+)
 BOOK_TOO_LATE = "⏰ <b>Это время уже недоступно для записи.</b> Выберите другое:"
 BOOK_CANCELLED = "✖ Запись отменена. Можно начать заново в любой момент."
 BOOK_ERROR = "Не удалось оформить запись: услуга больше недоступна. Начните заново."
@@ -324,6 +341,7 @@ ADMIN_HELP = (
     "/close <code>05.11-10.11</code> — закрыть даты для записи\n"
     "/close <code>05.11 13:00-14:00</code> — закрыть время (можно для диапазона дат)\n"
     "/open <code>05.11-10.11</code> — снова открыть даты или время\n"
+    "/horizon <code>30</code> — на сколько дней вперёд открыта запись\n"
     "Уже сделанные записи при закрытии сохраняются.\n\n"
     "Новые заявки приходят сюда автоматически, с кнопками подтверждения."
 )
@@ -461,11 +479,19 @@ def day_closure(
     return None
 
 
-ADMIN_CALENDAR = (
-    "🗓 <b>Доступное время</b>\n\n"
-    "Выберите день, чтобы закрыть или открыть его целиком или по времени.\n"
-    "🚫 — день закрыт · ◐ — закрыта часть времени"
-)
+def admin_calendar(horizon_days: int, last_day: date) -> str:
+    return (
+        "🗓 <b>Доступное время</b>\n\n"
+        + (
+            "📆 Запись открыта <b>только на сегодня</b>.\n\n"
+            if horizon_days == 0
+            else f"📆 Запись открыта на <b>{days_ahead(horizon_days)}</b> вперёд — "
+            f"по {format_date(last_day)}.\n\n"
+        )
+        + "Выберите день, чтобы закрыть или открыть его целиком или по времени. "
+        "Дни дальше горизонта тоже можно закрыть заранее.\n"
+        "🚫 — день закрыт · ◐ — закрыта часть времени"
+    )
 
 
 def admin_day_view(day: date, closure: str | None, bookings_count: int) -> str:
@@ -538,5 +564,35 @@ def admin_period_closed(period: str, kept: Sequence[Booking], open_hint: str) ->
 def admin_period_opened(period: str, horizon_days: int) -> str:
     return (
         f"✅ <b>Открыто для записи:</b> {period}\n"
-        f"<i>Клиенты видят даты не дальше {horizon_days} дней вперёд.</i>"
+        "<i>Клиенты видят даты "
+        + ("только на сегодня" if horizon_days == 0 else f"не дальше чем на {days_ahead(horizon_days)} вперёд")
+        + " (изменить — /horizon).</i>"
     )
+
+
+HORIZON_PRESETS = (7, 14, 30, 60, 90)
+BTN_HORIZON = "📆 Горизонт записи: {days}"
+
+
+def admin_horizon(horizon_days: int, last_day: date, notice: str | None = None) -> str:
+    head = f"{notice}\n\n" if notice else ""
+    today = "только на сегодня" if horizon_days == 0 else f"на <b>{days_ahead(horizon_days)}</b> вперёд"
+    return head + (
+        "📆 <b>Горизонт записи</b>\n\n"
+        f"Сейчас запись открыта {today}: клиенты видят даты "
+        f"по <b>{format_date(last_day)}</b> включительно.\n\n"
+        "Выберите значение или отправьте <code>/horizon N</code>, где N — от 0 до 365.\n"
+        "<i>Уже сделанные записи дальше горизонта сохраняются.</i>"
+    )
+
+
+def admin_horizon_set(horizon_days: int) -> str:
+    if horizon_days == 0:
+        return "✅ Запись открыта только на сегодня"
+    return f"✅ Запись открыта на {days_ahead(horizon_days)} вперёд"
+
+
+ADMIN_HORIZON_USAGE = (
+    "Укажите число дней от 0 до 365: <code>/horizon 30</code>\n"
+    "0 — запись только на сегодня."
+)

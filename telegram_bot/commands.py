@@ -25,6 +25,7 @@ ADMIN_COMMANDS = [
     BotCommand(command="schedule", description="Доступное время: календарь"),
     BotCommand(command="close", description="Закрыть даты: /close ДД.ММ-ДД.ММ"),
     BotCommand(command="open", description="Открыть даты: /open ДД.ММ-ДД.ММ"),
+    BotCommand(command="horizon", description="На сколько дней вперёд открыта запись"),
 ]
 
 

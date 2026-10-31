@@ -15,11 +15,17 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import schedule, texts
-from core.config import settings
 from core.parsing import ParseError, parse_period
 from db import repo
 from telegram_bot import keyboards as kb
-from telegram_bot.callbacks import AdminCalAction, AdminCalCb, AdminDayAction, AdminDayCb
+from telegram_bot.callbacks import (
+    AdminCalAction,
+    AdminCalCb,
+    AdminDayAction,
+    AdminDayCb,
+    HorizonAction,
+    HorizonCb,
+)
 from telegram_bot.filters import AccessibleMessage, IsAdmin
 from telegram_bot.utils import safe_edit
 
@@ -39,8 +45,12 @@ def _day_bounds(day: date) -> tuple[datetime, datetime]:
 # --- Календарь и день -----------------------------------------------------
 
 
-async def _calendar(session: AsyncSession, year: int, month: int) -> InlineKeyboardMarkup:
-    today = schedule.now_local().date()
+async def _calendar(
+    session: AsyncSession, year: int, month: int
+) -> tuple[str, InlineKeyboardMarkup]:
+    now = schedule.now_local()
+    today = now.date()
+    horizon = await repo.get_booking_horizon(session)
     month_start = date(year, month, 1)
     month_end = date(year, month, calendar.monthrange(year, month)[1])
     first = max(today, month_start)
@@ -54,13 +64,16 @@ async def _calendar(session: AsyncSession, year: int, month: int) -> InlineKeybo
             states[day] = schedule.day_state(day, closed)[0]
 
     months_from_now = (year - today.year) * 12 + (month - today.month)
-    return kb.admin_calendar_kb(
+    markup = kb.admin_calendar_kb(
         year,
         month,
         states,
         can_prev=months_from_now > 0,
         can_next=months_from_now < CALENDAR_MONTHS_AHEAD,
+        horizon_days=horizon,
     )
+    text = texts.admin_calendar(horizon, schedule.bookable_range(now, horizon)[1])
+    return text, markup
 
 
 async def _day_view(session: AsyncSession, day: date) -> tuple[str, InlineKeyboardMarkup]:
@@ -95,17 +108,15 @@ async def _day_view(session: AsyncSession, day: date) -> tuple[str, InlineKeyboa
 @router.message(or_f(Command("schedule"), F.text == texts.BTN_ADMIN_SCHEDULE))
 async def cmd_schedule(message: Message, session: AsyncSession) -> None:
     today = schedule.now_local().date()
-    await message.answer(
-        texts.ADMIN_CALENDAR, reply_markup=await _calendar(session, today.year, today.month)
-    )
+    text, markup = await _calendar(session, today.year, today.month)
+    await message.answer(text, reply_markup=markup)
 
 
 @router.callback_query(AdminCalCb.filter(F.action == AdminCalAction.NAV))
 async def calendar_nav(
     callback: CallbackQuery, callback_data: AdminCalCb, msg: Message, session: AsyncSession
 ) -> None:
-    markup = await _calendar(session, callback_data.year, callback_data.month)
-    await safe_edit(msg, texts.ADMIN_CALENDAR, markup)
+    await safe_edit(msg, *await _calendar(session, callback_data.year, callback_data.month))
     await callback.answer()
 
 
@@ -197,6 +208,49 @@ async def cmd_open(message: Message, command: CommandObject, session: AsyncSessi
         )
     await message.answer(
         texts.admin_period_opened(
-            texts.format_period(start, end, window), settings.booking_horizon_days
+            texts.format_period(start, end, window), await repo.get_booking_horizon(session)
         )
     )
+
+
+# --- Горизонт записи ------------------------------------------------------
+
+
+async def _horizon_view(
+    session: AsyncSession, notice: str | None = None
+) -> tuple[str, InlineKeyboardMarkup]:
+    horizon = await repo.get_booking_horizon(session)
+    last_day = schedule.bookable_range(schedule.now_local(), horizon)[1]
+    return texts.admin_horizon(horizon, last_day, notice), kb.horizon_kb(horizon)
+
+
+@router.message(Command("horizon"))
+async def cmd_horizon(message: Message, command: CommandObject, session: AsyncSession) -> None:
+    arg = (command.args or "").strip()
+    if not arg:
+        text, markup = await _horizon_view(session)
+        await message.answer(text, reply_markup=markup)
+        return
+    if not arg.isdigit() or not (
+        schedule.MIN_HORIZON_DAYS <= int(arg) <= schedule.MAX_HORIZON_DAYS
+    ):
+        await message.answer(texts.ADMIN_HORIZON_USAGE)
+        return
+    await repo.set_booking_horizon(session, int(arg))
+    text, markup = await _horizon_view(session, texts.admin_horizon_set(int(arg)))
+    await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(HorizonCb.filter(F.action == HorizonAction.SHOW))
+async def horizon_show(callback: CallbackQuery, msg: Message, session: AsyncSession) -> None:
+    await safe_edit(msg, *await _horizon_view(session))
+    await callback.answer()
+
+
+@router.callback_query(HorizonCb.filter(F.action == HorizonAction.SET))
+async def horizon_set(
+    callback: CallbackQuery, callback_data: HorizonCb, msg: Message, session: AsyncSession
+) -> None:
+    await repo.set_booking_horizon(session, callback_data.days)
+    await safe_edit(msg, *await _horizon_view(session))
+    await callback.answer(texts.admin_horizon_set(callback_data.days))
