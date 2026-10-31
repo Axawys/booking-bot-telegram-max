@@ -49,7 +49,7 @@ def services_kb(services: Iterable[Service]) -> InlineKeyboardMarkup:
     for s in services:
         builder.row(
             InlineKeyboardButton(
-                text=f"{s.name} · {texts.rub(s.price)}",
+                text=f"{s.name} · {texts.format_duration(s.duration_minutes)}",
                 callback_data=ServiceCb(id=s.id).pack(),
             )
         )

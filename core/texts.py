@@ -86,7 +86,7 @@ START = (
 
 def services_list(services: Iterable[Service]) -> str:
     lines = [
-        f"• {escape(s.name)} — <b>{rub(s.price)}</b> · {format_duration(s.duration_minutes)}"
+        f"• <b>{escape(s.name)}</b> · {format_duration(s.duration_minutes)}"
         for s in services
     ]
     if not lines:
