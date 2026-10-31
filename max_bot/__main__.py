@@ -31,8 +31,11 @@ async def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     if settings.max_bot_token is None:
-        log.error("MAX_BOT_TOKEN не задан — MAX-бот не запущен")
-        return 0
+        # Не завершаемся: с restart: unless-stopped контейнер иначе перезапускался
+        # бы по кругу. Просто ждём — после добавления токена `docker compose up -d`
+        # пересоздаст сервис.
+        log.warning("MAX_BOT_TOKEN не задан — MAX-бот не запущен и ожидает настройки")
+        await asyncio.Event().wait()
 
     api = MaxApi(settings.max_bot_token.get_secret_value(), settings.max_api_url)
     # Админы — в Telegram: заявки из MAX уходят им через Telegram Bot API.

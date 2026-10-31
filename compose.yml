@@ -31,8 +31,8 @@ services:
     <<: *app
     container_name: booking-max-bot
     command: python -m max_bot
-    # Без MAX_BOT_TOKEN бот завершается штатно (код 0) и не перезапускается.
-    restart: on-failure
+    # Без MAX_BOT_TOKEN бот пишет предупреждение в лог и ждёт настройки.
+    restart: unless-stopped
     depends_on:
       migrate:
         condition: service_completed_successfully
