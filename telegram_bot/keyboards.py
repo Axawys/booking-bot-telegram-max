@@ -321,3 +321,13 @@ def horizon_kb(current: int) -> InlineKeyboardMarkup:
         )
     )
     return builder.as_markup()
+
+
+def reminder_kb(booking_id: int) -> InlineKeyboardMarkup:
+    """Кнопка в напоминании ведёт в тот же сценарий отмены, что и «Мои записи»."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_REMINDER_CANCEL,
+        callback_data=MyBookingCb(action=MyBookingAction.ASK, booking_id=booking_id),
+    )
+    return builder.as_markup()

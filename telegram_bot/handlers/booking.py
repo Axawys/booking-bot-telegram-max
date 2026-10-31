@@ -33,6 +33,7 @@ from telegram_bot.callbacks import (
     SlotCb,
 )
 from telegram_bot.filters import AccessibleMessage
+from telegram_bot.scheduler import BookingScheduler
 from telegram_bot.states import BookingForm
 from telegram_bot.utils import safe_edit
 
@@ -368,7 +369,12 @@ async def phone_invalid(message: Message) -> None:
 
 @router.callback_query(BookingForm.confirm, NavCb.filter(F.action == NavAction.CONFIRM))
 async def confirm(
-    callback: CallbackQuery, msg: Message, state: FSMContext, session: AsyncSession, bot: Bot
+    callback: CallbackQuery,
+    msg: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    bot: Bot,
+    scheduler: BookingScheduler,
 ) -> None:
     data = await state.get_data()
     starts_at = datetime.fromisoformat(data["starts_at"])
@@ -434,6 +440,8 @@ async def confirm(
 
     if settings.admin_ids:
         await notify.notify_admins_new_booking(bot, await repo.get_booking(session, booking_id))
+    # Напоминания (запись подтверждена) или истечение заявки (ждёт админа).
+    await scheduler.sync_booking(booking_id)
 
 
 @router.callback_query(BookingForm.confirm, NavCb.filter(F.action == NavAction.BACK))

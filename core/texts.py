@@ -688,3 +688,43 @@ def admin_banned_list(rows: Sequence[tuple]) -> str:
             f"   с {utc_to_local(ban.created_at):%d.%m.%Y} · <code>/unban {ban.external_id}</code>"
         )
     return "⛔ <b>Забаненные</b>\n\n" + "\n".join(lines)
+
+
+# --- Планировщик: напоминания, истечение заявок, сводка -------------------
+
+BTN_REMINDER_CANCEL = "✖ Отменить запись"
+
+
+def _relative_day(day: date) -> str:
+    delta = (day - now_local().date()).days
+    if delta == 0:
+        return "сегодня"
+    if delta == 1:
+        return "завтра"
+    return f"{day.day} {MONTHS_GEN[day.month - 1]}"
+
+
+def client_reminder(booking: Booking) -> str:
+    when = f"{_relative_day(booking.starts_at.date())} в {booking.starts_at:%H:%M}"
+    return (
+        f"🔔 <b>Напоминаем: запись {when}</b>\n\n"
+        + _booking_short(booking)
+        + f"\n📍 Адрес: {ADDRESS}\n\n"
+        "Если планы изменились, отмените запись — время достанется другим."
+    )
+
+
+def client_booking_expired(booking: Booking) -> str:
+    return (
+        "⌛ <b>Заявка не была подтверждена вовремя</b>\n\n"
+        + _booking_short(booking)
+        + "\n\nВремя освобождено. Попробуйте записаться снова через «Записаться» "
+        f"или позвоните нам: {PHONE}."
+    )
+
+
+ADMIN_TITLE_EXPIRED = "⌛ Заявка истекла без решения"
+
+
+def admin_digest(day_schedule: str, pending: str) -> str:
+    return f"☀️ <b>Доброе утро!</b>\n\n{day_schedule}\n\n{pending}"

@@ -181,3 +181,20 @@ class BannedUser(Base):
     reason: Mapped[str | None] = mapped_column(String(255))
     banned_by: Mapped[int | None] = mapped_column(BigInteger, comment="ID админа")
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
+
+
+class SentReminder(Base):
+    """Отправленное напоминание о записи.
+
+    Первичный ключ (booking_id, kind) гарантирует на уровне БД, что одно
+    напоминание не уйдёт дважды — даже если задача запланирована повторно
+    (например, после перезапуска бота).
+    """
+
+    __tablename__ = "sent_reminders"
+
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True, comment="Например, 24h")
+    sent_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())

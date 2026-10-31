@@ -21,6 +21,7 @@ from db.models import (
     Client,
     ClosedSlot,
     Platform,
+    SentReminder,
     Service,
 )
 
@@ -466,10 +467,10 @@ async def ban_user(
     reason: str | None,
     banned_by: int,
     now: datetime,
-) -> int:
+) -> list[int]:
     """Забанить и отклонить все предстоящие записи пользователя (слоты освобождаются).
 
-    Возвращает число отклонённых записей. Повторный бан обновляет причину.
+    Возвращает id отклонённых записей. Повторный бан обновляет причину.
     """
     reason = reason[:255] if reason else None
     stmt = (
@@ -500,7 +501,7 @@ async def ban_user(
         booking.cancelled_at = _utcnow()
         booking.slots.clear()
     await session.commit()
-    return len(bookings)
+    return [booking.id for booking in bookings]
 
 
 async def unban_user(session: AsyncSession, platform: Platform, external_id: int) -> bool:
@@ -527,3 +528,43 @@ async def list_banned(
         .limit(limit)
     )
     return (await session.execute(stmt)).tuples().all()
+
+
+# --- Планировщик ----------------------------------------------------------
+
+
+async def get_schedulable_bookings(session: AsyncSession, now: datetime) -> Sequence[Booking]:
+    """Активные записи, которым ещё нужны задачи: напоминания или истечение заявки."""
+    stmt = select(Booking).where(
+        Booking.status.in_(ACTIVE_STATUSES), Booking.starts_at > now
+    )
+    return (await session.scalars(stmt)).all()
+
+
+async def get_sent_reminders(
+    session: AsyncSession, booking_ids: Sequence[int]
+) -> dict[int, set[str]]:
+    if not booking_ids:
+        return {}
+    stmt = select(SentReminder.booking_id, SentReminder.kind).where(
+        SentReminder.booking_id.in_(booking_ids)
+    )
+    sent: dict[int, set[str]] = {}
+    for booking_id, kind in await session.execute(stmt):
+        sent.setdefault(booking_id, set()).add(kind)
+    return sent
+
+
+async def claim_reminder(session: AsyncSession, booking_id: int, kind: str) -> bool:
+    """Отметить напоминание отправленным. False — его уже отправили раньше.
+
+    Отметка ставится до отправки: лучше в редком сбое не напомнить, чем
+    напомнить дважды.
+    """
+    session.add(SentReminder(booking_id=booking_id, kind=kind))
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        return False
+    return True

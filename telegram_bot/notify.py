@@ -18,13 +18,18 @@ from telegram_bot import keyboards as kb
 log = logging.getLogger(__name__)
 
 
-async def _send(bot: Bot, chat_id: int, text: str, markup: InlineKeyboardMarkup | None = None) -> bool:
+async def send(bot: Bot, chat_id: int, text: str, markup: InlineKeyboardMarkup | None = None) -> bool:
     try:
         await bot.send_message(chat_id, text, reply_markup=markup)
     except (TelegramForbiddenError, TelegramBadRequest) as exc:
         log.warning("Не удалось отправить сообщение в чат %s: %s", chat_id, exc)
         return False
     return True
+
+
+async def notify_admins(bot: Bot, text: str, markup: InlineKeyboardMarkup | None = None) -> None:
+    for admin_id in settings.admin_ids:
+        await send(bot, admin_id, text, markup)
 
 
 async def notify_admins_new_booking(bot: Bot, booking: Booking) -> None:
@@ -35,13 +40,13 @@ async def notify_admins_new_booking(bot: Bot, booking: Booking) -> None:
         title, markup = texts.ADMIN_TITLE_NEW_CONFIRMED, None
     text = texts.admin_booking_card(booking, title)
     for admin_id in settings.admin_ids:
-        await _send(bot, admin_id, text, markup)
+        await send(bot, admin_id, text, markup)
 
 
 async def notify_admins_cancelled(bot: Bot, booking: Booking) -> None:
     text = texts.admin_booking_card(booking, texts.ADMIN_TITLE_CANCELLED)
     for admin_id in settings.admin_ids:
-        await _send(bot, admin_id, text)
+        await send(bot, admin_id, text)
 
 
 async def notify_client_decision(bot: Bot, booking: Booking) -> None:
@@ -51,4 +56,4 @@ async def notify_client_decision(bot: Bot, booking: Booking) -> None:
         text = texts.client_booking_confirmed(booking)
     else:
         text = texts.client_booking_rejected(booking)
-    await _send(bot, booking.client.external_id, text)
+    await send(bot, booking.client.external_id, text)

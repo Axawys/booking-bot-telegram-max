@@ -10,6 +10,7 @@ from db.session import engine, session_factory
 from telegram_bot.commands import setup_commands
 from telegram_bot.handlers import setup_routers
 from telegram_bot.middlewares import BanMiddleware, DbSessionMiddleware, ThrottlingMiddleware
+from telegram_bot.scheduler import BookingScheduler
 
 
 async def main() -> None:
@@ -35,11 +36,17 @@ async def main() -> None:
     dp.update.middleware(BanMiddleware())
     dp.include_routers(*setup_routers())
 
+    # Задачи планировщика пересоздаются из БД при каждом старте.
+    scheduler = BookingScheduler(bot, session_factory)
+    dp["scheduler"] = scheduler  # доступен в хендлерах как аргумент `scheduler`
+
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await setup_commands(bot)
+        await scheduler.start()
         await dp.start_polling(bot)
     finally:
+        scheduler.shutdown()
         await engine.dispose()
 
 

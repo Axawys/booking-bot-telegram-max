@@ -40,12 +40,28 @@ class Settings(BaseSettings):
     max_active_bookings: int = 3
     max_bookings_per_day: int = 5
 
-    @field_validator("admin_ids", mode="before")
+    # --- Планировщик ---
+    # За сколько часов до визита напоминать клиенту: REMINDER_HOURS=24,2.
+    reminder_hours: Annotated[list[int], NoDecode] = [24, 2]
+    # Напоминание, время которого пришлось на простой бота, отправляется
+    # после старта, если опоздание не больше этого числа минут.
+    reminder_grace_minutes: int = 60
+    # Сколько часов заявка ждёт решения админа, потом отклоняется автоматически.
+    pending_ttl_hours: int = 12
+    # Время утренней сводки для админов; пусто — не отправлять.
+    admin_digest_time: time | None = time(9, 0)
+
+    @field_validator("admin_ids", "reminder_hours", mode="before")
     @classmethod
-    def _split_admin_ids(cls, value: object) -> object:
+    def _split_ints(cls, value: object) -> object:
         if isinstance(value, str):
             return [int(part) for part in value.replace(" ", "").split(",") if part]
         return value
+
+    @field_validator("admin_digest_time", mode="before")
+    @classmethod
+    def _empty_time_is_none(cls, value: object) -> object:
+        return None if value == "" else value
 
     @property
     def requires_confirmation(self) -> bool:

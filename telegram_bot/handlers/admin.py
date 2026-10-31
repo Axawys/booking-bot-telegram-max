@@ -16,6 +16,7 @@ from telegram_bot import keyboards as kb
 from telegram_bot import notify
 from telegram_bot.callbacks import AdminAction, AdminBookingCb
 from telegram_bot.filters import AccessibleMessage, IsAdmin
+from telegram_bot.scheduler import BookingScheduler
 from telegram_bot.utils import safe_edit
 
 router = Router(name="admin")
@@ -121,6 +122,7 @@ async def decide(
     msg: Message,
     session: AsyncSession,
     bot: Bot,
+    scheduler: BookingScheduler,
 ) -> None:
     approve = callback_data.action == AdminAction.CONFIRM
     booking = await repo.decide_booking(session, callback_data.booking_id, approve)
@@ -142,6 +144,8 @@ async def decide(
     )
     await notify.notify_client_decision(bot, booking)
     await callback.answer(texts.ADMIN_CONFIRMED_ALERT if approve else texts.ADMIN_REJECTED_ALERT)
+    # Подтверждена — запланировать напоминания; отклонена — снять задачи.
+    await scheduler.sync_booking(booking.id)
 
 
 # --- Бан из карточки заявки -----------------------------------------------
@@ -172,7 +176,11 @@ async def ban_ask_or_back(
 
 @router.callback_query(AdminBookingCb.filter(F.action == AdminAction.BAN), AccessibleMessage())
 async def ban_from_card(
-    callback: CallbackQuery, callback_data: AdminBookingCb, msg: Message, session: AsyncSession
+    callback: CallbackQuery,
+    callback_data: AdminBookingCb,
+    msg: Message,
+    session: AsyncSession,
+    scheduler: BookingScheduler,
 ) -> None:
     booking = await repo.get_booking(session, callback_data.booking_id)
     if booking is None:
@@ -182,7 +190,7 @@ async def ban_from_card(
     if settings.is_admin(client.external_id) and client.platform == Platform.TELEGRAM:
         await callback.answer(texts.ADMIN_CANT_BAN_ADMIN, show_alert=True)
         return
-    rejected = await repo.ban_user(
+    rejected_ids = await repo.ban_user(
         session,
         client.platform,
         client.external_id,
@@ -190,6 +198,7 @@ async def ban_from_card(
         banned_by=callback.from_user.id,
         now=schedule.now_local(),
     )
+    rejected = len(rejected_ids)
     booking = await repo.get_booking(session, callback_data.booking_id)
     await safe_edit(
         msg,
@@ -201,6 +210,8 @@ async def ban_from_card(
         ),
     )
     await callback.answer(texts.admin_ban_toast(rejected))
+    for booking_id in rejected_ids:
+        await scheduler.sync_booking(booking_id)
 
 
 # --- Команды банов --------------------------------------------------------
@@ -214,7 +225,9 @@ def _parse_user_id(args: str | None) -> tuple[int | None, str | None]:
 
 
 @router.message(Command("ban"))
-async def cmd_ban(message: Message, command: CommandObject, session: AsyncSession) -> None:
+async def cmd_ban(
+    message: Message, command: CommandObject, session: AsyncSession, scheduler: BookingScheduler
+) -> None:
     user_id, reason = _parse_user_id(command.args)
     if user_id is None:
         await message.answer(texts.ADMIN_BAN_USAGE)
@@ -222,11 +235,13 @@ async def cmd_ban(message: Message, command: CommandObject, session: AsyncSessio
     if settings.is_admin(user_id):
         await message.answer(texts.ADMIN_CANT_BAN_ADMIN)
         return
-    rejected = await repo.ban_user(
+    rejected_ids = await repo.ban_user(
         session, Platform.TELEGRAM, user_id, reason, message.from_user.id, schedule.now_local()
     )
     client = await repo.get_client(session, Platform.TELEGRAM, user_id)
-    await message.answer(texts.admin_banned(user_id, client, rejected))
+    await message.answer(texts.admin_banned(user_id, client, len(rejected_ids)))
+    for booking_id in rejected_ids:
+        await scheduler.sync_booking(booking_id)
 
 
 @router.message(Command("unban"))
