@@ -43,6 +43,11 @@ router.callback_query.filter(AccessibleMessage())
 # --- Вспомогательные функции ----------------------------------------------
 
 
+def _menu(user_id: int):
+    """Клиентское меню; админу — с кнопкой возврата в админку."""
+    return kb.client_menu(settings.is_admin(user_id))
+
+
 def _details(data: dict) -> dict:
     return {
         "service_name": data["service_name"],
@@ -156,7 +161,7 @@ async def start_booking(message: Message, state: FSMContext, session: AsyncSessi
 @router.message(F.text == texts.BTN_CANCEL)
 async def cancel_by_text(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer(texts.BOOK_CANCELLED, reply_markup=kb.main_menu)
+    await message.answer(texts.BOOK_CANCELLED, reply_markup=_menu(message.from_user.id))
 
 
 @router.callback_query(NavCb.filter(F.action == NavAction.CANCEL))
@@ -166,7 +171,7 @@ async def cancel_by_button(callback: CallbackQuery, msg: Message, state: FSMCont
     await safe_edit(msg, texts.BOOK_CANCELLED)
     # На шаге телефона главное меню было заменено — вернуть его.
     if data.get("menu_hidden"):
-        await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
+        await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(callback.from_user.id))
     await callback.answer()
 
 
@@ -371,7 +376,7 @@ async def confirm(
         await state.clear()
         await callback.answer()
         await safe_edit(msg, texts.BOOK_ERROR)
-        await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
+        await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(callback.from_user.id))
         return
 
     booking_id = booking.id
@@ -381,7 +386,7 @@ async def confirm(
         await safe_edit(msg, texts.book_pending(**_details(data)))
     else:
         await safe_edit(msg, texts.book_success(**_details(data)))
-    await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
+    await msg.answer(texts.BACK_TO_MENU, reply_markup=_menu(callback.from_user.id))
 
     if settings.admin_ids:
         await notify.notify_admins_new_booking(bot, await repo.get_booking(session, booking_id))

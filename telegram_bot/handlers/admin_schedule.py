@@ -10,7 +10,7 @@ import calendar
 from datetime import date, datetime, time, timedelta
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command, CommandObject, or_f
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,7 +92,7 @@ async def _day_view(session: AsyncSession, day: date) -> tuple[str, InlineKeyboa
     return text, markup
 
 
-@router.message(Command("schedule"))
+@router.message(or_f(Command("schedule"), F.text == texts.BTN_ADMIN_SCHEDULE))
 async def cmd_schedule(message: Message, session: AsyncSession) -> None:
     today = schedule.now_local().date()
     await message.answer(

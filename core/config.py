@@ -40,5 +40,8 @@ class Settings(BaseSettings):
     def requires_confirmation(self) -> bool:
         return bool(self.admin_ids)
 
+    def is_admin(self, user_id: int | None) -> bool:
+        return user_id is not None and user_id in self.admin_ids
+
 
 settings = Settings()

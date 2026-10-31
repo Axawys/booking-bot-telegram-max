@@ -3,8 +3,8 @@
 import re
 from datetime import date, datetime, time, timedelta
 
-from aiogram import Bot, Router
-from aiogram.filters import Command, CommandObject
+from aiogram import Bot, F, Router
+from aiogram.filters import Command, CommandObject, or_f
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,13 +27,23 @@ _DAY_ARG = re.compile(r"^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$")
 # --- Команды --------------------------------------------------------------
 
 
-@router.message(Command("admin"))
+@router.message(
+    or_f(Command("admin"), F.text.in_({texts.BTN_ADMIN_HELP, texts.BTN_ADMIN_MODE}))
+)
 async def cmd_admin(message: Message, session: AsyncSession) -> None:
     pending = await repo.count_pending_bookings(session, schedule.now_local())
-    await message.answer(f"{texts.ADMIN_HELP}\n\n{texts.admin_pending_count(pending)}")
+    await message.answer(
+        f"{texts.ADMIN_HELP}\n\n{texts.admin_pending_count(pending)}",
+        reply_markup=kb.admin_menu,
+    )
 
 
-@router.message(Command("pending"))
+@router.message(F.text == texts.BTN_CLIENT_MODE)
+async def client_mode(message: Message) -> None:
+    await message.answer(texts.CLIENT_MODE, reply_markup=kb.client_menu(is_admin=True))
+
+
+@router.message(or_f(Command("pending"), F.text == texts.BTN_ADMIN_PENDING))
 async def cmd_pending(message: Message, session: AsyncSession) -> None:
     bookings = await repo.get_pending_bookings(session, schedule.now_local())
     if not bookings:
@@ -56,12 +66,12 @@ async def _send_day(message: Message, session: AsyncSession, day: date) -> None:
     await message.answer(texts.admin_day_schedule(day, bookings, closure))
 
 
-@router.message(Command("today"))
+@router.message(or_f(Command("today"), F.text == texts.BTN_ADMIN_TODAY))
 async def cmd_today(message: Message, session: AsyncSession) -> None:
     await _send_day(message, session, schedule.now_local().date())
 
 
-@router.message(Command("tomorrow"))
+@router.message(or_f(Command("tomorrow"), F.text == texts.BTN_ADMIN_TOMORROW))
 async def cmd_tomorrow(message: Message, session: AsyncSession) -> None:
     await _send_day(message, session, schedule.now_local().date() + timedelta(days=1))
 
@@ -81,7 +91,7 @@ async def cmd_day(message: Message, command: CommandObject, session: AsyncSessio
     await _send_day(message, session, day)
 
 
-@router.message(Command("stats"))
+@router.message(or_f(Command("stats"), F.text == texts.BTN_ADMIN_STATS))
 async def cmd_stats(message: Message, session: AsyncSession) -> None:
     now = schedule.now_local()
     today = datetime.combine(now.date(), time.min)

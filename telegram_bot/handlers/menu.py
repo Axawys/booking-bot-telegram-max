@@ -6,16 +6,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import texts
 from db import repo
-from telegram_bot.keyboards import main_menu
+from core import schedule
+from core.config import settings
+from telegram_bot.keyboards import admin_menu, client_menu
 
 router = Router(name="menu")
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext) -> None:
+async def cmd_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
     await state.clear()
     name = html.quote(message.from_user.full_name) if message.from_user else "друг"
-    await message.answer(texts.START.format(name=name), reply_markup=main_menu)
+    if settings.is_admin(message.from_user.id):
+        pending = await repo.count_pending_bookings(session, schedule.now_local())
+        await message.answer(
+            texts.admin_start(name, texts.admin_pending_count(pending)), reply_markup=admin_menu
+        )
+        return
+    await message.answer(texts.START.format(name=name), reply_markup=client_menu())
 
 
 @router.message(F.text == texts.BTN_SERVICES)

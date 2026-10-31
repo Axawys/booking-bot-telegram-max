@@ -31,15 +31,36 @@ from telegram_bot.callbacks import (
     SlotCb,
 )
 
-main_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text=texts.BTN_BOOK), KeyboardButton(text=texts.BTN_MY_BOOKINGS)],
-        [KeyboardButton(text=texts.BTN_SERVICES), KeyboardButton(text=texts.BTN_CONTACTS)],
+def _reply_kb(rows: list[list[str]], placeholder: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=text) for text in row] for row in rows],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder=placeholder,
+    )
+
+
+_CLIENT_ROWS = [
+    [texts.BTN_BOOK, texts.BTN_MY_BOOKINGS],
+    [texts.BTN_SERVICES, texts.BTN_CONTACTS],
+]
+_client_menu = _reply_kb(_CLIENT_ROWS, "Выберите пункт меню")
+# Админ в режиме клиента видит ещё и кнопку возврата в админку.
+_client_menu_for_admin = _reply_kb(_CLIENT_ROWS + [[texts.BTN_ADMIN_MODE]], "Выберите пункт меню")
+
+admin_menu = _reply_kb(
+    [
+        [texts.BTN_ADMIN_PENDING, texts.BTN_ADMIN_STATS],
+        [texts.BTN_ADMIN_TODAY, texts.BTN_ADMIN_TOMORROW],
+        [texts.BTN_ADMIN_SCHEDULE, texts.BTN_ADMIN_HELP],
+        [texts.BTN_CLIENT_MODE],
     ],
-    resize_keyboard=True,
-    is_persistent=True,
-    input_field_placeholder="Выберите пункт меню",
+    "Админ-панель",
 )
+
+
+def client_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    return _client_menu_for_admin if is_admin else _client_menu
 
 
 def _noop(text: str = " ") -> InlineKeyboardButton:
