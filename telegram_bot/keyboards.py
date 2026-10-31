@@ -17,6 +17,10 @@ from telegram_bot.callbacks import (
     NOOP,
     AdminAction,
     AdminBookingCb,
+    AdminCalAction,
+    AdminCalCb,
+    AdminDayAction,
+    AdminDayCb,
     CalendarAction,
     CalendarCb,
     MyBookingAction,
@@ -168,5 +172,82 @@ def admin_decision_kb(booking_id: int) -> InlineKeyboardMarkup:
     builder.button(
         text=texts.BTN_ADMIN_REJECT,
         callback_data=AdminBookingCb(action=AdminAction.REJECT, booking_id=booking_id),
+    )
+    return builder.as_markup()
+
+
+_DAY_MARK = {texts.DAY_OPEN: "", texts.DAY_CLOSED: "🚫", texts.DAY_PARTIAL: "◐"}
+_SLOT_MARK = {texts.SLOT_OPEN: "✅", texts.SLOT_CLOSED: "🚫", texts.SLOT_BOOKED: "👤"}
+
+
+def admin_calendar_kb(
+    year: int, month: int, states: dict[date, str], can_prev: bool, can_next: bool
+) -> InlineKeyboardMarkup:
+    """Календарь админа. states — состояние каждого доступного дня; остальные дни — «·»."""
+    builder = InlineKeyboardBuilder()
+
+    def month_nav(text: str, delta: int) -> InlineKeyboardButton:
+        y, m = divmod(year * 12 + (month - 1) + delta, 12)
+        cb = AdminCalCb(action=AdminCalAction.NAV, year=y, month=m + 1)
+        return InlineKeyboardButton(text=text, callback_data=cb.pack())
+
+    builder.row(
+        month_nav("◀", -1) if can_prev else _noop(),
+        _noop(f"{texts.MONTHS[month - 1]} {year}"),
+        month_nav("▶", 1) if can_next else _noop(),
+    )
+    builder.row(*(_noop(name) for name in texts.WEEKDAYS_SHORT))
+    for week in calendar.Calendar().monthdayscalendar(year, month):
+        row = []
+        for day in week:
+            state = states.get(date(year, month, day)) if day else None
+            if state is None:
+                row.append(_noop("·" if day else " "))
+                continue
+            cb = AdminCalCb(action=AdminCalAction.DAY, year=year, month=month, day=day)
+            row.append(
+                InlineKeyboardButton(text=f"{_DAY_MARK[state]}{day}", callback_data=cb.pack())
+            )
+        builder.row(*row)
+    return builder.as_markup()
+
+
+def admin_day_kb(
+    day: date, slots: Sequence[tuple[datetime, str]], can_close: bool, can_open: bool
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    ymd = {"year": day.year, "month": day.month, "day": day.day}
+    for start, state in slots:
+        action = AdminDayAction.BOOKED if state == texts.SLOT_BOOKED else AdminDayAction.TOGGLE
+        builder.button(
+            text=f"{start:%H:%M} {_SLOT_MARK[state]}",
+            callback_data=AdminDayCb(action=action, hour=start.hour, minute=start.minute, **ymd),
+        )
+    builder.adjust(4)
+
+    day_actions = []
+    if can_close:
+        day_actions.append(
+            InlineKeyboardButton(
+                text=texts.BTN_ADMIN_CLOSE_DAY,
+                callback_data=AdminDayCb(action=AdminDayAction.CLOSE_DAY, **ymd).pack(),
+            )
+        )
+    if can_open:
+        day_actions.append(
+            InlineKeyboardButton(
+                text=texts.BTN_ADMIN_OPEN_DAY,
+                callback_data=AdminDayCb(action=AdminDayAction.OPEN_DAY, **ymd).pack(),
+            )
+        )
+    if day_actions:
+        builder.row(*day_actions)
+    builder.row(
+        InlineKeyboardButton(
+            text=texts.BTN_ADMIN_TO_CALENDAR,
+            callback_data=AdminCalCb(
+                action=AdminCalAction.NAV, year=day.year, month=day.month
+            ).pack(),
+        )
     )
     return builder.as_markup()

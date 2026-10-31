@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,13 +16,22 @@ from db.models import (
     BookingSlot,
     BookingStatus,
     Client,
+    ClosedSlot,
     Platform,
     Service,
 )
 
 
-class SlotAlreadyBookedError(Exception):
+class SlotUnavailableError(Exception):
+    """Время нельзя занять — так решила БД при вставке слотов записи."""
+
+
+class SlotAlreadyBookedError(SlotUnavailableError):
     """Хотя бы один слот уже занят: сработал уникальный индекс booking_slots."""
+
+
+class SlotClosedError(SlotUnavailableError):
+    """Хотя бы один слот закрыт админом: сработал триггер trg_booking_slots_not_closed."""
 
 
 def _utcnow() -> datetime:
@@ -96,9 +105,32 @@ async def get_busy_slots_between(
 
 
 async def get_busy_slots(session: AsyncSession, day: date) -> set[datetime]:
-    """Начала всех занятых слотов за день — для построения выбора времени."""
+    """Начала всех занятых слотов за день."""
     day_start = datetime.combine(day, time.min)
     return await get_busy_slots_between(session, day_start, day_start + timedelta(days=1))
+
+
+async def get_closed_slots_between(
+    session: AsyncSession, start: datetime, end: datetime
+) -> set[datetime]:
+    """Слоты, закрытые админом, в полуинтервале [start, end)."""
+    stmt = select(ClosedSlot.starts_at).where(
+        ClosedSlot.starts_at >= start, ClosedSlot.starts_at < end
+    )
+    return set((await session.scalars(stmt)).all())
+
+
+async def get_unavailable_slots_between(
+    session: AsyncSession, start: datetime, end: datetime
+) -> set[datetime]:
+    """Занятые записями и закрытые админом слоты — то, что нельзя предложить клиенту."""
+    busy = await get_busy_slots_between(session, start, end)
+    return busy | await get_closed_slots_between(session, start, end)
+
+
+async def get_unavailable_slots(session: AsyncSession, day: date) -> set[datetime]:
+    day_start = datetime.combine(day, time.min)
+    return await get_unavailable_slots_between(session, day_start, day_start + timedelta(days=1))
 
 
 async def create_booking(
@@ -114,6 +146,7 @@ async def create_booking(
     Проверка «свободно ли время» в коде здесь намеренно не делается: два клиента
     могут одновременно увидеть слот свободным. Гарантию даёт уникальный индекс
     booking_slots.starts_at — второй INSERT упадёт с IntegrityError.
+    Закрытое админом время так же отсекает триггер на booking_slots.
 
     Принимает id, а не ORM-объекты: после отката (слот занят) все объекты
     сессии становятся expired, и обращение к ним в async-коде падает.
@@ -149,6 +182,8 @@ async def create_booking(
         await session.rollback()
         if "booking_slots.starts_at" in str(exc.orig):
             raise SlotAlreadyBookedError from exc
+        if "slot_closed" in str(exc.orig):
+            raise SlotClosedError from exc
         raise
     return booking
 
@@ -310,3 +345,51 @@ async def booking_stats(
 
 async def count_clients(session: AsyncSession) -> int:
     return await session.scalar(select(func.count()).select_from(Client))
+
+
+# --- Закрытие времени админом ---------------------------------------------
+
+
+async def close_slots(session: AsyncSession, starts: Sequence[datetime]) -> None:
+    """Закрыть слоты для новых записей. Уже закрытые пропускаются."""
+    if starts:
+        stmt = sqlite_insert(ClosedSlot).on_conflict_do_nothing(
+            index_elements=[ClosedSlot.starts_at]
+        )
+        await session.execute(stmt, [{"starts_at": s} for s in starts])
+    await session.commit()
+
+
+async def open_slots(session: AsyncSession, starts: Sequence[datetime]) -> None:
+    if starts:
+        await session.execute(delete(ClosedSlot).where(ClosedSlot.starts_at.in_(starts)))
+    await session.commit()
+
+
+async def open_slots_between(session: AsyncSession, start: datetime, end: datetime) -> None:
+    """Открыть всё закрытое время в полуинтервале [start, end)."""
+    await session.execute(
+        delete(ClosedSlot).where(ClosedSlot.starts_at >= start, ClosedSlot.starts_at < end)
+    )
+    await session.commit()
+
+
+async def toggle_closed_slot(session: AsyncSession, starts_at: datetime) -> bool:
+    """Переключить слот. True — если теперь он закрыт."""
+    result = await session.execute(delete(ClosedSlot).where(ClosedSlot.starts_at == starts_at))
+    closed = result.rowcount == 0
+    if closed:
+        session.add(ClosedSlot(starts_at=starts_at))
+    await session.commit()
+    return closed
+
+
+async def get_slot_booking(session: AsyncSession, starts_at: datetime) -> Booking | None:
+    """Активная запись, которая занимает слот."""
+    stmt = (
+        select(Booking)
+        .join(BookingSlot)
+        .where(BookingSlot.starts_at == starts_at)
+        .options(selectinload(Booking.client), selectinload(Booking.service))
+    )
+    return await session.scalar(stmt)

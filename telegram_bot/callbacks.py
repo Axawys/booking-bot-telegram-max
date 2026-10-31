@@ -56,3 +56,31 @@ class AdminAction(StrEnum):
 class AdminBookingCb(CallbackData, prefix="adm"):
     action: AdminAction
     booking_id: int
+
+
+class AdminCalAction(StrEnum):
+    NAV = "nav"
+    DAY = "day"
+
+
+class AdminCalCb(CallbackData, prefix="acal"):
+    action: AdminCalAction
+    year: int
+    month: int
+    day: int = 0
+
+
+class AdminDayAction(StrEnum):
+    TOGGLE = "toggle"
+    CLOSE_DAY = "close"
+    OPEN_DAY = "open"
+    BOOKED = "booked"
+
+
+class AdminDayCb(CallbackData, prefix="aday"):
+    action: AdminDayAction
+    year: int
+    month: int
+    day: int
+    hour: int = 0
+    minute: int = 0

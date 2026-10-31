@@ -22,6 +22,9 @@ ADMIN_COMMANDS = [
     BotCommand(command="tomorrow", description="Расписание на завтра"),
     BotCommand(command="day", description="Расписание на дату: /day ДД.ММ"),
     BotCommand(command="stats", description="Статистика"),
+    BotCommand(command="schedule", description="Доступное время: календарь"),
+    BotCommand(command="close", description="Закрыть даты: /close ДД.ММ-ДД.ММ"),
+    BotCommand(command="open", description="Открыть даты: /open ДД.ММ-ДД.ММ"),
 ]
 
 

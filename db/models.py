@@ -133,3 +133,20 @@ class BookingSlot(Base):
     starts_at: Mapped[datetime]
 
     booking: Mapped[Booking] = relationship(back_populates="slots")
+
+
+class ClosedSlot(Base):
+    """Слот, закрытый администратором для новых записей.
+
+    «Закрыть день» = закрыть все слоты дня. Существующие записи не трогаются.
+    Запрет записи на закрытое время проверяет сама БД: триггер
+    trg_booking_slots_not_closed (миграция «closed slots») не даёт вставить
+    строку в booking_slots, если её время есть в closed_slots.
+    Внимание: batch-миграция, пересоздающая booking_slots, удалит триггер —
+    его нужно создать заново в той же миграции.
+    """
+
+    __tablename__ = "closed_slots"
+
+    starts_at: Mapped[datetime] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())

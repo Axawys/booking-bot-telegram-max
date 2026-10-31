@@ -4,6 +4,7 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timedelta
 from html import escape
 
+from core.schedule import now_local
 from db.models import Booking, BookingStatus, Client, Platform, Service
 
 # --- Кнопки ---------------------------------------------------------------
@@ -166,6 +167,7 @@ BOOK_NO_SLOTS_ALERT = "На этот день свободного времен�
 BOOK_DAY_UNAVAILABLE_ALERT = "На эту дату запись недоступна."
 BOOK_SLOT_GONE_ALERT = "Это время уже недоступно. Выберите другое."
 BOOK_SLOT_TAKEN = "😔 <b>Это время только что заняли.</b> Выберите другое:"
+BOOK_SLOT_CLOSED = "⛔ <b>Это время только что закрыли для записи.</b> Выберите другое:"
 BOOK_TOO_LATE = "⏰ <b>Это время уже недоступно для записи.</b> Выберите другое:"
 BOOK_CANCELLED = "✖ Запись отменена. Можно начать заново в любой момент."
 BOOK_ERROR = "Не удалось оформить запись: услуга больше недоступна. Начните заново."
@@ -307,6 +309,12 @@ ADMIN_HELP = (
     "/day <code>ДД.ММ</code> — расписание на дату\n"
     "/stats — статистика\n"
     "/admin — эта справка\n\n"
+    "<b>Доступное время</b>\n"
+    "/schedule — календарь: закрыть или открыть день целиком или отдельное время\n"
+    "/close <code>05.11-10.11</code> — закрыть даты для записи\n"
+    "/close <code>05.11 13:00-14:00</code> — закрыть время (можно для диапазона дат)\n"
+    "/open <code>05.11-10.11</code> — снова открыть даты или время\n"
+    "Уже сделанные записи при закрытии сохраняются.\n\n"
     "Новые заявки приходят сюда автоматически, с кнопками подтверждения."
 )
 ADMIN_NO_PENDING = "✨ Заявок, ожидающих подтверждения, нет."
@@ -350,8 +358,12 @@ ADMIN_TITLE_PENDING = "📋 Заявка"
 ADMIN_TITLE_CANCELLED = "🚫 Клиент отменил запись"
 
 
-def admin_day_schedule(day: date, bookings: Sequence[Booking]) -> str:
+def admin_day_schedule(
+    day: date, bookings: Sequence[Booking], closure: str | None = None
+) -> str:
     head = f"📅 <b>Расписание на {format_date(day)}</b>\n\n"
+    if closure:
+        head += f"{closure}\n\n"
     if not bookings:
         return head + "Записей нет."
     lines = []
@@ -394,4 +406,110 @@ def admin_stats(today: dict, week: dict, month: dict, clients: int) -> str:
         f"• отклонено: {month.get(BookingStatus.REJECTED, (0, 0))[0]}\n\n"
         f"👥 Клиентов в базе: <b>{clients}</b>\n\n"
         "<i>Суммы считаются по текущим ценам услуг.</i>"
+    )
+
+
+# --- Администратор: доступное время ---------------------------------------
+
+BTN_ADMIN_CLOSE_DAY = "🚫 Закрыть весь день"
+BTN_ADMIN_OPEN_DAY = "✅ Открыть весь день"
+BTN_ADMIN_TO_CALENDAR = "⬅ К календарю"
+
+DAY_OPEN, DAY_CLOSED, DAY_PARTIAL = "open", "closed", "partial"
+SLOT_OPEN, SLOT_CLOSED, SLOT_BOOKED = "open", "closed", "booked"
+
+
+def _ranges(ranges: Iterable[tuple[datetime, datetime]]) -> str:
+    return ", ".join(f"{a:%H:%M}–{b:%H:%M}" for a, b in ranges)
+
+
+def day_closure(
+    state: str, closed_ranges: Sequence[tuple[datetime, datetime]]
+) -> str | None:
+    """Строка о закрытом времени дня. None — день открыт полностью."""
+    if state == DAY_CLOSED:
+        return "🚫 <b>День закрыт для записи</b>"
+    if state == DAY_PARTIAL:
+        return f"◐ <b>Закрыто для записи:</b> {_ranges(closed_ranges)}"
+    return None
+
+
+ADMIN_CALENDAR = (
+    "🗓 <b>Доступное время</b>\n\n"
+    "Выберите день, чтобы закрыть или открыть его целиком или по времени.\n"
+    "🚫 — день закрыт · ◐ — закрыта часть времени"
+)
+
+
+def admin_day_view(day: date, closure: str | None, bookings_count: int) -> str:
+    return (
+        f"🗓 <b>{format_date(day)}</b>\n\n"
+        + (closure or "✅ День открыт для записи")
+        + f"\nЗаписей: <b>{bookings_count}</b>\n\n"
+        "Нажмите на время, чтобы закрыть ✅→🚫 или открыть 🚫→✅.\n"
+        "👤 — есть запись: она сохранится, даже если закрыть это время."
+    )
+
+
+def admin_slot_toggled(starts_at: datetime, closed: bool) -> str:
+    return f"{starts_at:%H:%M} {'закрыто' if closed else 'открыто'}"
+
+
+def admin_slot_booking_alert(booking: Booking) -> str:
+    """Текст всплывающего окна: без HTML, до 200 символов."""
+    return (
+        f"{booking.starts_at:%H:%M}–{booking.ends_at:%H:%M} · {booking.service.name}\n"
+        f"{booking.client.full_name}, {booking.client.phone or '—'}\n"
+        f"Статус: {STATUS_LABELS[booking.status]} · #{booking.id}"
+    )[:200]
+
+
+def format_period(start: date, end: date, window: tuple | None = None) -> str:
+    def d(day: date, with_year: bool) -> str:
+        text = f"{day.day} {MONTHS_GEN[day.month - 1]}"
+        return f"{text} {day.year}" if with_year else text
+
+    other_year = start.year != now_local().year or end.year != start.year
+    if start == end:
+        text = d(start, other_year)
+    elif (start.year, start.month) == (end.year, end.month):
+        text = f"{start.day}–{d(end, other_year)}"
+    else:
+        text = f"{d(start, other_year)} – {d(end, other_year)}"
+    if window:
+        text += f", {window[0]:%H:%M}–{window[1]:%H:%M}"
+    return text
+
+
+def admin_period_usage(command: str, error: str | None = None) -> str:
+    head = f"⚠️ {escape(error)}.\n\n" if error else ""
+    return head + (
+        "Формат:\n"
+        f"<code>/{command} 05.11</code> — один день\n"
+        f"<code>/{command} 05.11-10.11</code> — диапазон дат\n"
+        f"<code>/{command} 05.11 13:00-14:00</code> — время в дне\n"
+        f"<code>/{command} 05.11-10.11 13:00-14:00</code> — время в каждом дне диапазона"
+    )
+
+
+def admin_period_closed(period: str, kept: Sequence[Booking], open_hint: str) -> str:
+    text = f"🚫 <b>Закрыто для записи:</b> {period}"
+    if kept:
+        lines = [
+            f"• {b.starts_at:%d.%m %H:%M} · {escape(b.service.name)} · "
+            f"{client_mention(b.client)} · #{b.id}"
+            for b in kept[:10]
+        ]
+        if len(kept) > 10:
+            lines.append(f"…и ещё {len(kept) - 10}")
+        text += (
+            f"\n\nЗаписи в этом периоде сохранены ({len(kept)}):\n" + "\n".join(lines)
+        )
+    return text + f"\n\nОткрыть снова: <code>/open {open_hint}</code>"
+
+
+def admin_period_opened(period: str, horizon_days: int) -> str:
+    return (
+        f"✅ <b>Открыто для записи:</b> {period}\n"
+        f"<i>Клиенты видят даты не дальше {horizon_days} дней вперёд.</i>"
     )

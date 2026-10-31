@@ -1,7 +1,8 @@
 """Сценарий записи: услуга → дата → время → телефон → подтверждение.
 
 Свободность времени проверяется в коде только ради удобства (не показывать
-занятое). Гарантию от двойной записи даёт уникальный индекс booking_slots в БД:
+занятое и закрытое админом). Гарантию даёт БД: уникальный индекс booking_slots
+от двойной записи и триггер от записи на закрытое время. Например,
 если два клиента подтвердят одно время одновременно, второй получит
 SlotAlreadyBookedError и вернётся к выбору времени.
 """
@@ -82,7 +83,7 @@ async def _show_calendar(
     available: set[date] = set()
     if lo <= hi:
         # Один запрос на весь видимый диапазон вместо запроса на каждый день.
-        busy = await repo.get_busy_slots_between(
+        busy = await repo.get_unavailable_slots_between(
             session,
             datetime.combine(lo, time.min),
             datetime.combine(hi + timedelta(days=1), time.min),
@@ -112,7 +113,7 @@ async def _show_times(
 ) -> bool:
     """Показать свободное время на день. False — если свободного времени нет."""
     data = await state.get_data()
-    busy = await repo.get_busy_slots(session, day)
+    busy = await repo.get_unavailable_slots(session, day)
     starts = schedule.available_starts(day, data["duration"], busy, schedule.now_local())
     if not starts:
         return False
@@ -259,7 +260,7 @@ async def pick_slot(
     day = date.fromisoformat(data["day"])
     starts_at = datetime.combine(day, time(callback_data.hour, callback_data.minute))
 
-    busy = await repo.get_busy_slots(session, day)
+    busy = await repo.get_unavailable_slots(session, day)
     if starts_at not in schedule.available_starts(day, data["duration"], busy, schedule.now_local()):
         await callback.answer(texts.BOOK_SLOT_GONE_ALERT, show_alert=True)
         await _back_to_times(msg, state, session)
@@ -360,6 +361,11 @@ async def confirm(
         # Сработал уникальный индекс: кто-то успел занять это время раньше.
         await callback.answer()
         await _back_to_times(msg, state, session, texts.BOOK_SLOT_TAKEN)
+        return
+    except repo.SlotClosedError:
+        # Сработал триггер: админ закрыл это время, пока клиент оформлял запись.
+        await callback.answer()
+        await _back_to_times(msg, state, session, texts.BOOK_SLOT_CLOSED)
         return
     except ValueError:
         await state.clear()

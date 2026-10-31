@@ -49,8 +49,11 @@ async def cmd_pending(message: Message, session: AsyncSession) -> None:
 
 async def _send_day(message: Message, session: AsyncSession, day: date) -> None:
     start = datetime.combine(day, time.min)
-    bookings = await repo.get_bookings_between(session, start, start + timedelta(days=1))
-    await message.answer(texts.admin_day_schedule(day, bookings))
+    end = start + timedelta(days=1)
+    bookings = await repo.get_bookings_between(session, start, end)
+    closed = await repo.get_closed_slots_between(session, start, end)
+    closure = texts.day_closure(*schedule.day_state(day, closed))
+    await message.answer(texts.admin_day_schedule(day, bookings, closure))
 
 
 @router.message(Command("today"))
