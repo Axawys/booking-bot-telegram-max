@@ -2,8 +2,10 @@ from aiogram import F, Router, html
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.types import Message
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import texts
+from db import repo
 from telegram_bot.keyboards import main_menu
 
 router = Router(name="main")
@@ -30,8 +32,9 @@ async def my_bookings(message: Message) -> None:
 
 
 @router.message(F.text == texts.BTN_SERVICES)
-async def services(message: Message) -> None:
-    await message.answer(texts.SERVICES, parse_mode=ParseMode.HTML)
+async def services(message: Message, session: AsyncSession) -> None:
+    items = await repo.get_active_services(session)
+    await message.answer(texts.services_list(items), parse_mode=ParseMode.HTML)
 
 
 @router.message(F.text == texts.BTN_CONTACTS)

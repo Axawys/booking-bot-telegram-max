@@ -1,5 +1,10 @@
 """Тексты бота. Общие для Telegram и MAX, разметка — HTML."""
 
+from collections.abc import Iterable
+from html import escape
+
+from db.models import Service
+
 BTN_BOOK = "Записаться"
 BTN_MY_BOOKINGS = "Мои записи"
 BTN_SERVICES = "Услуги и цены"
@@ -34,15 +39,23 @@ MY_BOOKINGS = (
     "<i>Просмотр, перенос и отмена записей — в разработке.</i>"
 )
 
-SERVICES = (
-    "💼 <b>Услуги и цены</b>\n\n"
-    "💇 Женская стрижка — <b>1 500 ₽</b> · 60 мин\n"
-    "💇‍♂️ Мужская стрижка — <b>1 000 ₽</b> · 45 мин\n"
-    "🎨 Окрашивание — от <b>3 000 ₽</b> · 120 мин\n"
-    "💅 Маникюр с покрытием — <b>2 000 ₽</b> · 90 мин\n"
-    "👁 Оформление бровей — <b>800 ₽</b> · 30 мин\n\n"
-    "<i>Цены демонстрационные.</i>"
-)
+def _rub(amount: int) -> str:
+    """1500 -> '1 500 ₽' (неразрывные пробелы, чтобы цена не переносилась)."""
+    return f"{amount:,}".replace(",", "\u202f") + "\u00a0₽"
+
+
+def services_list(services: Iterable[Service]) -> str:
+    lines = [
+        f"• {escape(s.name)} — <b>{_rub(s.price)}</b> · {s.duration_minutes} мин"
+        for s in services
+    ]
+    if not lines:
+        return "💼 <b>Услуги и цены</b>\n\nСписок услуг пока пуст."
+    return (
+        "💼 <b>Услуги и цены</b>\n\n"
+        + "\n".join(lines)
+        + "\n\n<i>Цены демонстрационные.</i>"
+    )
 
 CONTACTS = (
     "📍 <b>Контакты</b>\n\n"

@@ -3,4 +3,9 @@ services:
     build: .
     container_name: booking-telegram-bot
     env_file: .env
+    volumes:
+      - bot-data:/app/data
     restart: unless-stopped
+
+volumes:
+  bot-data:

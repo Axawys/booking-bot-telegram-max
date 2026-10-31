@@ -46,8 +46,11 @@ htmlcov/
 *.log
 
 # Local databases
+data/
 *.sqlite3
 *.db
+*.db-wal
+*.db-shm
 
 # IDE / OS
 .idea/
