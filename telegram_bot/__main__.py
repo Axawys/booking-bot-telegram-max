@@ -7,6 +7,7 @@ from aiogram.enums import ParseMode
 
 from core.config import settings
 from db.session import engine, session_factory
+from telegram_bot.commands import setup_commands
 from telegram_bot.handlers import setup_routers
 from telegram_bot.middlewares import DbSessionMiddleware
 
@@ -27,6 +28,7 @@ async def main() -> None:
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
+        await setup_commands(bot)
         await dp.start_polling(bot)
     finally:
         await engine.dispose()

@@ -9,7 +9,7 @@ SlotAlreadyBookedError и вернётся к выбору времени.
 import calendar
 from datetime import date, datetime, time, timedelta
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
@@ -19,8 +19,9 @@ from core import schedule, texts
 from core.config import settings
 from core.phone import normalize_phone
 from db import repo
-from db.models import Platform
+from db.models import BookingStatus, Platform
 from telegram_bot import keyboards as kb
+from telegram_bot import notify
 from telegram_bot.callbacks import (
     NOOP,
     CalendarAction,
@@ -331,7 +332,7 @@ async def phone_invalid(message: Message) -> None:
 
 @router.callback_query(BookingForm.confirm, NavCb.filter(F.action == NavAction.CONFIRM))
 async def confirm(
-    callback: CallbackQuery, msg: Message, state: FSMContext, session: AsyncSession
+    callback: CallbackQuery, msg: Message, state: FSMContext, session: AsyncSession, bot: Bot
 ) -> None:
     data = await state.get_data()
     starts_at = datetime.fromisoformat(data["starts_at"])
@@ -348,9 +349,12 @@ async def confirm(
     client_id = client.id
     await repo.set_client_phone(session, client_id, data["phone"])
 
+    # Если есть администраторы — заявка ждёт их подтверждения, но слоты
+    # занимаются сразу: время уже не достанется другому клиенту.
+    status = BookingStatus.PENDING if settings.requires_confirmation else BookingStatus.CONFIRMED
     try:
-        await repo.create_booking(
-            session, client_id, data["service_id"], starts_at, settings.slot_minutes
+        booking = await repo.create_booking(
+            session, client_id, data["service_id"], starts_at, settings.slot_minutes, status
         )
     except repo.SlotAlreadyBookedError:
         # Сработал уникальный индекс: кто-то успел занять это время раньше.
@@ -364,10 +368,17 @@ async def confirm(
         await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
         return
 
+    booking_id = booking.id
     await state.clear()
     await callback.answer("✅ Готово!")
-    await safe_edit(msg, texts.book_success(**_details(data)))
+    if status == BookingStatus.PENDING:
+        await safe_edit(msg, texts.book_pending(**_details(data)))
+    else:
+        await safe_edit(msg, texts.book_success(**_details(data)))
     await msg.answer(texts.BACK_TO_MENU, reply_markup=kb.main_menu)
+
+    if settings.admin_ids:
+        await notify.notify_admins_new_booking(bot, await repo.get_booking(session, booking_id))
 
 
 @router.callback_query(BookingForm.confirm, NavCb.filter(F.action == NavAction.BACK))

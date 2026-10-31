@@ -15,6 +15,8 @@ from core import texts
 from db.models import Booking, Service
 from telegram_bot.callbacks import (
     NOOP,
+    AdminAction,
+    AdminBookingCb,
     CalendarAction,
     CalendarCb,
     MyBookingAction,
@@ -154,4 +156,17 @@ def my_booking_cancel_kb(booking_id: int) -> InlineKeyboardMarkup:
         callback_data=MyBookingCb(action=MyBookingAction.LIST),
     )
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def admin_decision_kb(booking_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_ADMIN_CONFIRM,
+        callback_data=AdminBookingCb(action=AdminAction.CONFIRM, booking_id=booking_id),
+    )
+    builder.button(
+        text=texts.BTN_ADMIN_REJECT,
+        callback_data=AdminBookingCb(action=AdminAction.REJECT, booking_id=booking_id),
+    )
     return builder.as_markup()

@@ -46,3 +46,13 @@ class MyBookingAction(StrEnum):
 class MyBookingCb(CallbackData, prefix="my"):
     action: MyBookingAction
     booking_id: int = 0
+
+
+class AdminAction(StrEnum):
+    CONFIRM = "confirm"
+    REJECT = "reject"
+
+
+class AdminBookingCb(CallbackData, prefix="adm"):
+    action: AdminAction
+    booking_id: int

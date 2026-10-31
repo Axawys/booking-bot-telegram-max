@@ -3,6 +3,8 @@ from typing import Any
 from aiogram.filters import BaseFilter
 from aiogram.types import CallbackQuery, Message
 
+from core.config import settings
+
 
 class AccessibleMessage(BaseFilter):
     """Пропускает callback, только если его сообщение доступно для редактирования.
@@ -15,3 +17,10 @@ class AccessibleMessage(BaseFilter):
         if isinstance(callback.message, Message):
             return {"msg": callback.message}
         return False
+
+
+class IsAdmin(BaseFilter):
+    """Пользователь указан в ADMIN_IDS."""
+
+    async def __call__(self, event: Message | CallbackQuery) -> bool:
+        return event.from_user is not None and event.from_user.id in settings.admin_ids

@@ -41,10 +41,15 @@ def do_run_migrations(connection: Connection) -> None:
     _configure(connection=connection)
     with context.begin_transaction():
         context.run_migrations()
+        # FK во время миграций выключены — проверяем целостность явно.
+        if connection.dialect.name == "sqlite":
+            broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise RuntimeError(f"Нарушены внешние ключи после миграции: {broken}")
 
 
 async def run_async_migrations() -> None:
-    engine = create_engine(settings.database_url)
+    engine = create_engine(settings.database_url, enforce_foreign_keys=False)
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()

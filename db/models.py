@@ -30,8 +30,14 @@ class Platform(enum.StrEnum):
 
 
 class BookingStatus(enum.StrEnum):
+    PENDING = "pending"  # ждёт подтверждения администратором
     CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
+    CANCELLED = "cancelled"  # отменена клиентом
+    REJECTED = "rejected"  # отклонена администратором
+
+
+# Записи в этих статусах занимают слоты расписания.
+ACTIVE_STATUSES = (BookingStatus.PENDING, BookingStatus.CONFIRMED)
 
 
 def _str_enum(enum_cls: type[enum.StrEnum], name: str) -> Enum:
@@ -95,7 +101,9 @@ class Booking(Base):
         server_default=BookingStatus.CONFIRMED.value,
     )
     created_at: Mapped[datetime] = mapped_column(server_default=func.current_timestamp())
-    cancelled_at: Mapped[datetime | None]
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        comment="Когда запись отменена клиентом или отклонена (UTC)"
+    )
 
     client: Mapped[Client] = relationship(back_populates="bookings")
     service: Mapped[Service] = relationship()

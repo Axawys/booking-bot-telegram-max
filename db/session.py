@@ -7,19 +7,26 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from core.config import settings
 
 
-def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
-    cursor = dbapi_connection.cursor()
-    # В SQLite внешние ключи по умолчанию выключены — без этого не работают
-    # ON DELETE CASCADE / RESTRICT.
-    cursor.execute("PRAGMA foreign_keys=ON")
-    # WAL: чтение не блокируется записью.
-    cursor.execute("PRAGMA journal_mode=WAL")
-    # Ждать до 5 с, если БД занята другой записью, вместо мгновенной ошибки.
-    cursor.execute("PRAGMA busy_timeout=5000")
-    cursor.close()
+def _sqlite_pragmas(enforce_foreign_keys: bool):
+    def set_pragmas(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        # В SQLite внешние ключи по умолчанию выключены — без этого не работают
+        # ON DELETE CASCADE / RESTRICT.
+        cursor.execute(f"PRAGMA foreign_keys={'ON' if enforce_foreign_keys else 'OFF'}")
+        # WAL: чтение не блокируется записью.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        # Ждать до 5 с, если БД занята другой записью, вместо мгновенной ошибки.
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
+    return set_pragmas
 
 
-def create_engine(url: str) -> AsyncEngine:
+def create_engine(url: str, *, enforce_foreign_keys: bool = True) -> AsyncEngine:
+    """Async-движок. enforce_foreign_keys=False — только для миграций:
+    batch-миграции SQLite пересоздают таблицы, и DROP родительской таблицы
+    при включённых FK каскадно удалил бы дочерние строки.
+    """
     parsed = make_url(url)
     is_sqlite = parsed.get_backend_name() == "sqlite"
     if is_sqlite and parsed.database and parsed.database != ":memory:":
@@ -27,7 +34,7 @@ def create_engine(url: str) -> AsyncEngine:
 
     engine = create_async_engine(url)
     if is_sqlite:
-        event.listen(engine.sync_engine, "connect", _set_sqlite_pragmas)
+        event.listen(engine.sync_engine, "connect", _sqlite_pragmas(enforce_foreign_keys))
     return engine
 
 

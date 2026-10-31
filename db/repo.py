@@ -3,14 +3,22 @@
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.schedule import iter_slot_starts
-from db.models import Booking, BookingSlot, BookingStatus, Client, Platform, Service
+from db.models import (
+    ACTIVE_STATUSES,
+    Booking,
+    BookingSlot,
+    BookingStatus,
+    Client,
+    Platform,
+    Service,
+)
 
 
 class SlotAlreadyBookedError(Exception):
@@ -99,6 +107,7 @@ async def create_booking(
     service_id: int,
     starts_at: datetime,
     slot_minutes: int,
+    status: BookingStatus = BookingStatus.CONFIRMED,
 ) -> Booking:
     """Создать запись и занять её слоты одной транзакцией.
 
@@ -127,6 +136,7 @@ async def create_booking(
         service=service,
         starts_at=starts_at,
         ends_at=ends_at,
+        status=status,
         slots=[
             BookingSlot(starts_at=slot)
             for slot in iter_slot_starts(starts_at, ends_at, slot_minutes)
@@ -150,7 +160,7 @@ async def get_upcoming_bookings(
         select(Booking)
         .where(
             Booking.client_id == client_id,
-            Booking.status == BookingStatus.CONFIRMED,
+            Booking.status.in_(ACTIVE_STATUSES),
             Booking.starts_at >= now,
         )
         .options(selectinload(Booking.service))
@@ -162,13 +172,13 @@ async def get_upcoming_bookings(
 async def get_upcoming_booking(
     session: AsyncSession, booking_id: int, client_id: int, now: datetime
 ) -> Booking | None:
-    """Предстоящая подтверждённая запись, только если она принадлежит клиенту."""
+    """Предстоящая активная запись, только если она принадлежит клиенту."""
     stmt = (
         select(Booking)
         .where(
             Booking.id == booking_id,
             Booking.client_id == client_id,
-            Booking.status == BookingStatus.CONFIRMED,
+            Booking.status.in_(ACTIVE_STATUSES),
             Booking.starts_at > now,
         )
         .options(selectinload(Booking.service))
@@ -188,7 +198,7 @@ async def cancel_booking(
         .where(
             Booking.id == booking_id,
             Booking.client_id == client_id,
-            Booking.status == BookingStatus.CONFIRMED,
+            Booking.status.in_(ACTIVE_STATUSES),
             Booking.starts_at > now,
         )
         .options(selectinload(Booking.slots))
@@ -202,3 +212,101 @@ async def cancel_booking(
     booking.slots.clear()  # delete-orphan удалит строки booking_slots
     await session.commit()
     return True
+
+
+# --- Администрирование ----------------------------------------------------
+
+
+async def get_booking(session: AsyncSession, booking_id: int) -> Booking | None:
+    """Запись с клиентом и услугой — для уведомлений и карточек админа."""
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.client), selectinload(Booking.service))
+        # Объект мог остаться в identity map со старым статусом.
+        .execution_options(populate_existing=True)
+    )
+    return await session.scalar(stmt)
+
+
+async def decide_booking(session: AsyncSession, booking_id: int, approve: bool) -> Booking | None:
+    """Подтвердить или отклонить заявку. None — если она уже не ждёт решения.
+
+    Условие status = pending в самом запросе: если два админа нажмут кнопки
+    одновременно, решение примет только первый.
+    """
+    stmt = (
+        select(Booking)
+        .where(Booking.id == booking_id, Booking.status == BookingStatus.PENDING)
+        .options(
+            selectinload(Booking.client),
+            selectinload(Booking.service),
+            selectinload(Booking.slots),
+        )
+    )
+    booking = await session.scalar(stmt)
+    if booking is None:
+        return None
+
+    if approve:
+        booking.status = BookingStatus.CONFIRMED
+    else:
+        booking.status = BookingStatus.REJECTED
+        booking.cancelled_at = _utcnow()
+        booking.slots.clear()  # время снова свободно
+    await session.commit()
+    return booking
+
+
+async def get_bookings_between(
+    session: AsyncSession, start: datetime, end: datetime
+) -> Sequence[Booking]:
+    """Активные записи, начинающиеся в [start, end) — расписание для админа."""
+    stmt = (
+        select(Booking)
+        .where(
+            Booking.status.in_(ACTIVE_STATUSES),
+            Booking.starts_at >= start,
+            Booking.starts_at < end,
+        )
+        .options(selectinload(Booking.client), selectinload(Booking.service))
+        .order_by(Booking.starts_at)
+    )
+    return (await session.scalars(stmt)).all()
+
+
+async def get_pending_bookings(
+    session: AsyncSession, now: datetime, limit: int = 20
+) -> Sequence[Booking]:
+    stmt = (
+        select(Booking)
+        .where(Booking.status == BookingStatus.PENDING, Booking.starts_at > now)
+        .options(selectinload(Booking.client), selectinload(Booking.service))
+        .order_by(Booking.starts_at)
+        .limit(limit)
+    )
+    return (await session.scalars(stmt)).all()
+
+
+async def count_pending_bookings(session: AsyncSession, now: datetime) -> int:
+    stmt = select(func.count()).where(
+        Booking.status == BookingStatus.PENDING, Booking.starts_at > now
+    )
+    return await session.scalar(stmt)
+
+
+async def booking_stats(
+    session: AsyncSession, start: datetime, end: datetime
+) -> dict[BookingStatus, tuple[int, int]]:
+    """{статус: (кол-во записей, сумма цен услуг)} для записей в [start, end)."""
+    stmt = (
+        select(Booking.status, func.count(), func.coalesce(func.sum(Service.price), 0))
+        .join(Service)
+        .where(Booking.starts_at >= start, Booking.starts_at < end)
+        .group_by(Booking.status)
+    )
+    return {status: (count, total) for status, count, total in await session.execute(stmt)}
+
+
+async def count_clients(session: AsyncSession) -> int:
+    return await session.scalar(select(func.count()).select_from(Client))
